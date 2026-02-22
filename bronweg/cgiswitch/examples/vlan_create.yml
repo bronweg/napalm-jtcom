@@ -1,0 +1,26 @@
+---
+- name: Create VLANs on JTCom switch
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    switch_host: 192.168.51.21
+    switch_user: admin
+    switch_pass: admin
+
+  tasks:
+    - name: Ensure VLAN 10 and 20 exist
+      bronweg.cgiswitch.jtcom_config:
+        host: "{{ switch_host }}"
+        username: "{{ switch_user }}"
+        password: "{{ switch_pass }}"
+        verify_tls: false
+        vlans:
+          10:
+            name: Management
+            untagged_ports: [0]
+          20:
+            name: Data
+            tagged_ports: [7]
+            untagged_ports: [1, 2, 3]

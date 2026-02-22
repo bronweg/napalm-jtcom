@@ -1,0 +1,21 @@
+---
+- name: Delete a VLAN on JTCom switch
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    switch_host: 192.168.51.21
+    switch_user: admin
+    switch_pass: admin
+
+  tasks:
+    - name: Remove VLAN 99 if it exists
+      bronweg.cgiswitch.jtcom_config:
+        host: "{{ switch_host }}"
+        username: "{{ switch_user }}"
+        password: "{{ switch_pass }}"
+        verify_tls: false
+        vlans:
+          99:
+            state: absent

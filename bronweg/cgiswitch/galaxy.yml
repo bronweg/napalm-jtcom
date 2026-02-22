@@ -1,0 +1,23 @@
+namespace: bronweg
+name: cgiswitch
+version: 0.1.0
+readme: README.md
+description: Ansible modules for CGI-based L2 Ethernet switches (JTCom)
+license:
+- MIT
+license_file: ''
+tags:
+- networking
+- l2
+- switch
+- jtcom
+- cgi
+- napalm
+homepage: https://github.com/bronweg/napalm-jtcom
+repository: https://github.com/bronweg/napalm-jtcom
+documentation: https://github.com/bronweg/napalm-jtcom
+issues: https://github.com/bronweg/napalm-jtcom/issues
+authors:
+- Ulis Ilya <ulis.ilya@gmail.com>
+dependencies: {}
+build_ignore: []

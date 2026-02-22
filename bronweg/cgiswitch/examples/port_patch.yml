@@ -1,0 +1,28 @@
+---
+- name: Patch port configuration on JTCom switch
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    switch_host: 192.168.51.21
+    switch_user: admin
+    switch_pass: admin
+
+  tasks:
+    - name: Set speed/duplex and enable/disable ports
+      bronweg.cgiswitch.jtcom_config:
+        host: "{{ switch_host }}"
+        username: "{{ switch_user }}"
+        password: "{{ switch_pass }}"
+        verify_tls: false
+        ports:
+          1:
+            admin_up: true
+            speed: Auto
+            flow_control: false
+          2:
+            admin_up: true
+            speed: 1000M/Full
+          3:
+            admin_up: false
