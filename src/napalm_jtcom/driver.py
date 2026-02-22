@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
+import pathlib
 from typing import Any
 
 from napalm.base.base import NetworkDriver
 
 from napalm_jtcom.client.errors import JTComError
 from napalm_jtcom.client.session import JTComCredentials, JTComSession
+from napalm_jtcom.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
+from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
 from napalm_jtcom.parser.device import parse_device_info, parse_uptime_seconds
 from napalm_jtcom.parser.port import parse_port_page
 from napalm_jtcom.parser.vlan import parse_port_vlan_settings, parse_static_vlans
+from napalm_jtcom.utils.vlan_diff import plan_vlan_changes
 from napalm_jtcom.vendor.jtcom.endpoints import (
     DEVICE_INFO,
     PORT_SETTINGS,
@@ -226,6 +231,141 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         for vid, ve in sorted(vlan_map.items()):
             all_ports = sorted(set(ve.tagged_ports + ve.untagged_ports))
             result[str(vid)] = {"name": ve.name, "interfaces": all_ports}
+        return result
+
+    def set_vlans(
+        self,
+        desired_vlans: dict[int, VlanConfig],
+        *,
+        dry_run: bool = False,
+        allow_delete: bool = False,
+        allow_membership: bool = False,
+        allow_rename: bool = True,
+    ) -> dict[str, Any]:
+        """Apply a declarative VLAN configuration to the switch.
+
+        Computes the difference between the current VLAN state and *desired_vlans*,
+        optionally saves a binary configuration backup, then creates / updates /
+        deletes VLANs as needed.
+
+        Args:
+            desired_vlans: Mapping of VLAN ID → :class:`~napalm_jtcom.model.vlan.VlanConfig`
+                representing the target state.
+            dry_run: If ``True``, compute and return the change plan without
+                applying anything to the switch.
+            allow_delete: Allow deletion of VLANs present on the switch but absent
+                from *desired_vlans*.  VLAN 1 is never deleted.
+            allow_membership: Include port-membership differences in update detection.
+            allow_rename: Include VLAN name differences in update detection
+                (default ``True``).
+
+        Returns:
+            A dict with keys:
+
+            - ``"backup_file"`` – path to the saved backup, or ``""`` if skipped.
+            - ``"create"`` – list of VLAN IDs that were (or would be) created.
+            - ``"update"`` – list of VLAN IDs that were (or would be) updated.
+            - ``"delete"`` – list of VLAN IDs that were (or would be) deleted.
+
+        Raises:
+            JTComError: If the session is not open.
+            JTComSwitchError: If any switch operation returns a non-zero code.
+        """
+        session = self._require_session()
+
+        # --- Fetch current state ---
+        static_html = session.get(VLAN_STATIC, params={"page": "static"})
+        port_html = session.get(VLAN_PORT_BASED, params={"page": "port_based"})
+        vlans = parse_static_vlans(static_html)
+        port_configs = parse_port_vlan_settings(port_html)
+
+        vlan_map: dict[int, VlanEntry] = {v.vlan_id: v for v in vlans}
+        for pc in port_configs:
+            if pc.vlan_type.lower() == "access" and pc.access_vlan is not None:
+                entry = vlan_map.get(pc.access_vlan)
+                if entry is not None:
+                    entry.untagged_ports.append(pc.port_name)
+            elif pc.vlan_type.lower() == "trunk":
+                if pc.native_vlan is not None:
+                    entry = vlan_map.get(pc.native_vlan)
+                    if entry is not None:
+                        entry.untagged_ports.append(pc.port_name)
+                for vid in pc.permit_vlans:
+                    entry = vlan_map.get(vid)
+                    if entry is not None:
+                        entry.tagged_ports.append(pc.port_name)
+
+        # --- Plan changes ---
+        change_set = plan_vlan_changes(
+            vlan_map,
+            desired_vlans,
+            allow_delete=allow_delete,
+            allow_membership=allow_membership,
+            allow_rename=allow_rename,
+        )
+
+        result: dict[str, Any] = {
+            "backup_file": "",
+            "create": [c.vlan_id for c in change_set.create],
+            "update": [u.vlan_id for u in change_set.update],
+            "delete": change_set.delete,
+        }
+
+        if dry_run:
+            return result
+
+        # --- Backup before change ---
+        if self.optional_args.get("backup_before_change", True):
+            backup_dir = pathlib.Path(
+                str(self.optional_args.get("backup_dir", "./backups"))
+            )
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            safe_host = self.hostname.replace("://", "_").replace("/", "_").replace(":", "_")
+            filename = f"jtcom_{safe_host}_{ts}_switch_cfg.bin"
+            backup_path = backup_dir / filename
+            raw = session.download_config_backup()
+            backup_path.write_bytes(raw)
+            result["backup_file"] = str(backup_path)
+            logger.info("Config backup saved to %s (%d bytes)", backup_path, len(raw))
+
+        # --- Apply creates (ascending VID) ---
+        for cfg in change_set.create:
+            vlan_create(session, cfg.vlan_id, cfg.name)
+            logger.info("Created VLAN %d (%s)", cfg.vlan_id, cfg.name)
+
+        # --- Apply updates (ascending VID) ---
+        for cfg in change_set.update:
+            vlan_create(session, cfg.vlan_id, cfg.name)
+            logger.info("Updated VLAN %d (%s)", cfg.vlan_id, cfg.name)
+
+        # --- Apply membership changes ---
+        if allow_membership:
+            for cfg in change_set.create + change_set.update:
+                if cfg.untagged_ports:
+                    vlan_set_port(
+                        session,
+                        port_ids=cfg.untagged_ports,
+                        vlan_type="access",
+                        access_vlan=cfg.vlan_id,
+                        native_vlan=None,
+                        permit_vlans=[],
+                    )
+                if cfg.tagged_ports:
+                    vlan_set_port(
+                        session,
+                        port_ids=cfg.tagged_ports,
+                        vlan_type="trunk",
+                        access_vlan=None,
+                        native_vlan=1,
+                        permit_vlans=[cfg.vlan_id],
+                    )
+
+        # --- Apply deletes (descending VID) ---
+        if change_set.delete:
+            vlan_delete(session, sorted(change_set.delete, reverse=True))
+            logger.info("Deleted VLANs %s", sorted(change_set.delete, reverse=True))
+
         return result
 
     def is_alive(self) -> dict[str, bool]:

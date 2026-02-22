@@ -14,7 +14,7 @@ from napalm_jtcom.client.errors import (
     JTComSwitchError,
 )
 from napalm_jtcom.client.http import JTComHTTP
-from napalm_jtcom.vendor.jtcom.endpoints import LOGIN, LOGOUT
+from napalm_jtcom.vendor.jtcom.endpoints import CONFIG_BACKUP, LOGIN, LOGOUT
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,27 @@ class JTComSession:
             )
 
         return result
+
+    def download_config_backup(self) -> bytes:
+        """Download a raw binary configuration backup from the switch.
+
+        Issues ``GET /config.cgi?cmd=conf_backup`` and returns the raw response
+        bytes (the switch sends no ``Content-Type`` or ``Content-Disposition``
+        headers, so callers are responsible for choosing a filename).
+
+        Returns:
+            Raw binary content of the switch configuration backup.
+        """
+        self.ensure_session()
+        resp = self._http.get(
+            CONFIG_BACKUP,
+            params={
+                "cmd": "conf_backup",
+                "page": _PAGE_PARAM,
+                "stamp": str(int(time.time())),
+            },
+        )
+        return resp.content
 
     def close(self) -> None:
         """Logout and close the underlying HTTP session."""

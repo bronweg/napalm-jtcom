@@ -24,3 +24,11 @@ VLAN_PORT_BASED: str = "/vlan.cgi"
 # Trunk / LAG
 TRUNK_GROUP: str = "/trunk.cgi"
 TRUNK_LACP: str = "/trunk.cgi"
+
+# VLAN write operations (confirmed from real switch)
+VLAN_CREATE_DELETE: str = "/staticvlan.cgi"  # POST: create (cmd=add) or delete (cmd=del)
+VLAN_PORT_SET: str = "/vlanport.cgi"          # POST: per-port VLAN membership
+
+# Configuration backup
+CONFIG_BACKUP: str = "/config.cgi"            # GET ?cmd=conf_backup → raw binary
+

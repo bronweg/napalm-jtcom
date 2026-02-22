@@ -89,13 +89,15 @@ class JTComHTTP:
     def post_form(
         self,
         path: str,
-        data: dict[str, str] | None = None,
+        data: dict[str, str] | list[tuple[str, str]] | None = None,
     ) -> requests.Response:
         """Send an HTTP POST with form-encoded *data* to *path*.
 
         Args:
             path: URL path relative to :attr:`base_url`.
-            data: Optional form fields.
+            data: Optional form fields.  May be a ``dict`` for simple payloads
+                or a ``list[tuple[str, str]]`` when repeated keys are needed
+                (e.g. multiple ``del=`` fields for bulk VLAN deletion).
 
         Returns:
             The :class:`requests.Response`.
