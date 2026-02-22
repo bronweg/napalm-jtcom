@@ -9,16 +9,20 @@ from typing import Any
 
 from napalm.base.base import NetworkDriver
 
-from napalm_jtcom.client.errors import JTComError
+from napalm_jtcom.client.errors import JTComError, JTComVerificationError
 from napalm_jtcom.client.port_ops import apply_port_changes
 from napalm_jtcom.client.session import JTComCredentials, JTComSession
 from napalm_jtcom.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
-from napalm_jtcom.model.port import PortChangeSet, PortConfig
+from napalm_jtcom.model.config import DeviceConfig
+from napalm_jtcom.model.port import PortChangeSet, PortConfig, PortSettings
 from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
 from napalm_jtcom.parser.device import parse_device_info, parse_uptime_seconds
 from napalm_jtcom.parser.port import parse_port_page
 from napalm_jtcom.parser.vlan import parse_port_vlan_settings, parse_static_vlans
+from napalm_jtcom.utils.device_diff import build_device_plan
+from napalm_jtcom.utils.normalize import normalize_device_config
 from napalm_jtcom.utils.port_diff import plan_port_changes
+from napalm_jtcom.utils.render import render_diff
 from napalm_jtcom.utils.vlan_diff import plan_vlan_changes
 from napalm_jtcom.vendor.jtcom.endpoints import (
     DEVICE_INFO,
@@ -455,6 +459,199 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         logger.info("Port changes applied: %s", result["updated_ports"])
 
         return result
+
+
+    def apply_device_config(
+        self,
+        desired: DeviceConfig,
+        *,
+        check_mode: bool = False,
+        allow_vlan_delete: bool = False,
+        allow_vlan_membership: bool = True,
+        allow_vlan_rename: bool = True,
+        backup_before_change: bool | None = None,
+    ) -> dict[str, Any]:
+        """Apply a canonical device configuration to the switch idempotently.
+
+        Reads the current switch state, normalizes both current and desired
+        configs, computes a deterministic change plan, and applies only what
+        has changed.  A post-apply read-back verifies the result.
+
+        Args:
+            desired: Target :class:`~napalm_jtcom.model.config.DeviceConfig`.
+            check_mode: If ``True``, return the plan without applying anything.
+            allow_vlan_delete: Allow deletion of VLANs absent from *desired*.
+                VLAN 1 is never deleted.
+            allow_vlan_membership: Include port membership changes in the plan.
+            allow_vlan_rename: Include VLAN name changes in the plan.
+            backup_before_change: Override the ``backup_before_change`` optional
+                arg.  ``None`` means use the optional_args value (default ``True``).
+
+        Returns:
+            A dict with keys:
+
+            - ``"changed"`` — ``True`` if any changes were (or would be) applied.
+            - ``"diff"`` — rendered plan dict from :func:`~napalm_jtcom.utils.render.render_diff`.
+            - ``"backup_file"`` — path to the backup, or ``""`` if skipped.
+            - ``"applied"`` — list of change keys that were applied.
+
+        Raises:
+            JTComError: If the session is not open.
+            JTComVerificationError: If post-apply verification detects residual
+                differences between the switch state and *desired*.
+        """
+        session = self._require_session()
+        safety_port_id: int = int(self.optional_args.get("safety_port_id", 6))
+
+        # --- Read and normalize current state ---
+        current_vlans, current_ports = self._read_current_state(session)
+        current_cfg = DeviceConfig.from_current(current_vlans, current_ports)
+        current_n = normalize_device_config(current_cfg)
+        desired_n = normalize_device_config(desired)
+
+        # --- Build plan ---
+        plan = build_device_plan(
+            current_n,
+            desired_n,
+            allow_vlan_delete=allow_vlan_delete,
+            allow_vlan_membership=allow_vlan_membership,
+            allow_vlan_rename=allow_vlan_rename,
+            safety_port_id=safety_port_id,
+        )
+        diff = render_diff(plan)
+
+        if not plan.changes:
+            return {"changed": False, "diff": diff, "backup_file": "", "applied": []}
+
+        if check_mode:
+            return {"changed": True, "diff": diff, "backup_file": "", "applied": []}
+
+        # --- Backup before change ---
+        do_backup = (
+            backup_before_change
+            if backup_before_change is not None
+            else bool(self.optional_args.get("backup_before_change", True))
+        )
+        backup_file = self._save_backup(session) if do_backup else ""
+
+        # --- Apply changes in plan order ---
+        applied: list[str] = []
+        for change in plan.changes:
+            if change.kind in ("vlan_create", "vlan_update"):
+                vid = change.details["vlan_id"]
+                vc = desired_n.vlans[vid]
+                vlan_create(session, vc.vlan_id, vc.name)
+                logger.info("%s VLAN %d (%s)", change.kind, vid, vc.name)
+                if allow_vlan_membership:
+                    if vc.untagged_ports:
+                        vlan_set_port(
+                            session,
+                            port_ids=vc.untagged_ports,
+                            vlan_type="access",
+                            access_vlan=vc.vlan_id,
+                            native_vlan=None,
+                            permit_vlans=[],
+                        )
+                    if vc.tagged_ports:
+                        vlan_set_port(
+                            session,
+                            port_ids=vc.tagged_ports,
+                            vlan_type="trunk",
+                            access_vlan=None,
+                            native_vlan=1,
+                            permit_vlans=[vc.vlan_id],
+                        )
+            elif change.kind == "vlan_delete":
+                vid = change.details["vlan_id"]
+                vlan_delete(session, [vid])
+                logger.info("Deleted VLAN %d", vid)
+            elif change.kind == "port_update":
+                pid = change.details["port_id"]
+                desired_port = desired_n.ports[pid]
+                port_cs = PortChangeSet(update=[desired_port])
+                apply_port_changes(session, current_ports, port_cs)
+                logger.info("Updated port %d", pid)
+            applied.append(change.key)
+
+        # --- Post-apply verification ---
+        post_vlans, post_ports = self._read_current_state(session)
+        post_cfg = DeviceConfig.from_current(post_vlans, post_ports)
+        post_n = normalize_device_config(post_cfg)
+        residual_plan = build_device_plan(
+            post_n,
+            desired_n,
+            allow_vlan_delete=allow_vlan_delete,
+            allow_vlan_membership=allow_vlan_membership,
+            allow_vlan_rename=allow_vlan_rename,
+            safety_port_id=safety_port_id,
+        )
+        if residual_plan.changes:
+            raise JTComVerificationError(remaining_diff=render_diff(residual_plan))
+
+        return {
+            "changed": True,
+            "diff": diff,
+            "backup_file": backup_file,
+            "applied": applied,
+        }
+
+    def _read_current_state(
+        self, session: JTComSession
+    ) -> tuple[dict[int, VlanEntry], list[PortSettings]]:
+        """Read VLANs and ports from the switch and return both.
+
+        Args:
+            session: Active authenticated session.
+
+        Returns:
+            A tuple of ``(vlan_map, settings_list)`` where ``vlan_map`` is a
+            ``dict[int, VlanEntry]`` (with port memberships populated) and
+            ``settings_list`` is a ``list[PortSettings]``.
+        """
+        static_html = session.get(VLAN_STATIC, params={"page": "static"})
+        port_html = session.get(VLAN_PORT_BASED, params={"page": "port_based"})
+        vlans = parse_static_vlans(static_html)
+        port_vlan_configs = parse_port_vlan_settings(port_html)
+
+        vlan_map: dict[int, VlanEntry] = {v.vlan_id: v for v in vlans}
+        for pc in port_vlan_configs:
+            if pc.vlan_type.lower() == "access" and pc.access_vlan is not None:
+                entry = vlan_map.get(pc.access_vlan)
+                if entry is not None:
+                    entry.untagged_ports.append(pc.port_name)
+            elif pc.vlan_type.lower() == "trunk":
+                if pc.native_vlan is not None:
+                    entry = vlan_map.get(pc.native_vlan)
+                    if entry is not None:
+                        entry.untagged_ports.append(pc.port_name)
+                for vid in pc.permit_vlans:
+                    entry = vlan_map.get(vid)
+                    if entry is not None:
+                        entry.tagged_ports.append(pc.port_name)
+
+        port_html2 = session.get(PORT_SETTINGS)
+        settings_list, _ = parse_port_page(port_html2)
+        return vlan_map, settings_list
+
+    def _save_backup(self, session: JTComSession) -> str:
+        """Download a config backup and save it to disk.
+
+        Args:
+            session: Active authenticated session.
+
+        Returns:
+            The local file path of the saved backup.
+        """
+        backup_dir = pathlib.Path(str(self.optional_args.get("backup_dir", "./backups")))
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        safe_host = self.hostname.replace("://", "_").replace("/", "_").replace(":", "_")
+        filename = f"jtcom_{safe_host}_{ts}_switch_cfg.bin"
+        backup_path = backup_dir / filename
+        raw = session.download_config_backup()
+        backup_path.write_bytes(raw)
+        logger.info("Config backup saved to %s (%d bytes)", backup_path, len(raw))
+        return str(backup_path)
 
     def is_alive(self) -> dict[str, bool]:
         """Return liveness status of the HTTP session."""

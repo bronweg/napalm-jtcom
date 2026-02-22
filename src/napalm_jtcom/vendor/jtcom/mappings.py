@@ -21,3 +21,37 @@ DUPLEX_MAP: dict[str, str] = {
     "Half": "half",
     "Auto": "auto",
 }
+
+
+# Canonical speed/duplex tokens — must match keys in client.port_ops.SPEED_TOKEN_TO_CODE.
+SPEED_DUPLEX_CANONICAL: frozenset[str] = frozenset(
+    {
+        "Auto",
+        "10M/Half",
+        "10M/Full",
+        "100M/Half",
+        "100M/Full",
+        "1000M/Full",
+        "2500M/Full",
+        "10G/Full",
+    }
+)
+
+# Maps lower-cased alternative representations to their canonical token.
+SPEED_DUPLEX_ALIASES: dict[str, str] = {
+    "auto": "Auto",
+    "10m/half": "10M/Half",
+    "10m/full": "10M/Full",
+    "100m/half": "100M/Half",
+    "100m/full": "100M/Full",
+    "1000m/full": "1000M/Full",
+    "1g/full": "1000M/Full",
+    "2500m/full": "2500M/Full",
+    "10g/full": "10G/Full",
+    "10mhalf": "10M/Half",
+    "10mfull": "10M/Full",
+    "100mhalf": "100M/Half",
+    "100mfull": "100M/Full",
+    "1000mfull": "1000M/Full",
+    "1gfull": "1000M/Full",
+}

@@ -53,3 +53,22 @@ class JTComSwitchError(JTComError):
         super().__init__(
             f"Switch error code={self.code} at {self.endpoint!r}: {self.message}"
         )
+
+
+@dataclass
+class JTComVerificationError(JTComError):
+    """Raised when post-apply verification finds residual differences.
+
+    Attributes:
+        remaining_diff: Rendered diff (from :func:`~napalm_jtcom.utils.render.render_diff`)
+            showing what still differs after the apply attempt.
+    """
+
+    remaining_diff: dict[str, object]
+
+    def __post_init__(self) -> None:
+        n = self.remaining_diff.get("total_changes", "?")
+        super().__init__(
+            f"Post-apply verification failed: {n} change(s) still outstanding. "
+            "See .remaining_diff for details."
+        )

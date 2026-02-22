@@ -1,0 +1,289 @@
+"""Unit tests for the device-level diff / plan engine."""
+
+from __future__ import annotations
+
+import pytest
+
+from napalm_jtcom.model.config import DeviceConfig
+from napalm_jtcom.model.port import PortConfig
+from napalm_jtcom.model.vlan import VlanConfig
+from napalm_jtcom.utils.device_diff import build_device_plan
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _cfg(
+    vlans: dict[int, VlanConfig] | None = None,
+    ports: dict[int, PortConfig] | None = None,
+) -> DeviceConfig:
+    return DeviceConfig(vlans=vlans or {}, ports=ports or {})
+
+
+def _vlan(vid: int, name: str = "v", tagged: list[int] | None = None,
+          untagged: list[int] | None = None) -> VlanConfig:
+    return VlanConfig(vlan_id=vid, name=name,
+                      tagged_ports=tagged or [], untagged_ports=untagged or [])
+
+
+def _port(pid: int, admin_up: bool | None = None, speed: str | None = None,
+          flow: bool | None = None) -> PortConfig:
+    return PortConfig(port_id=pid, admin_up=admin_up, speed_duplex=speed,
+                      flow_control=flow)
+
+
+# ---------------------------------------------------------------------------
+# No-change cases
+# ---------------------------------------------------------------------------
+
+
+def test_no_changes_empty_configs() -> None:
+    plan = build_device_plan(_cfg(), _cfg())
+    assert plan.changes == []
+    assert plan.summary == {"vlan_create": 0, "vlan_update": 0,
+                            "port_update": 0, "vlan_delete": 0}
+
+
+def test_no_changes_identical_vlan() -> None:
+    cfg = _cfg(vlans={10: _vlan(10, "data", untagged=[0, 1])})
+    plan = build_device_plan(cfg, cfg)
+    assert plan.changes == []
+
+
+def test_no_changes_identical_port() -> None:
+    cfg = _cfg(ports={1: _port(1, admin_up=True, speed="Auto", flow=True)})
+    plan = build_device_plan(cfg, cfg)
+    assert plan.changes == []
+
+
+# ---------------------------------------------------------------------------
+# VLAN creates
+# ---------------------------------------------------------------------------
+
+
+def test_vlan_create_new_vlan() -> None:
+    cur = _cfg()
+    des = _cfg(vlans={20: _vlan(20, "new")})
+    plan = build_device_plan(cur, des)
+    assert len(plan.changes) == 1
+    ch = plan.changes[0]
+    assert ch.kind == "vlan_create"
+    assert ch.key == "vlan:20"
+    assert ch.details["vlan_id"] == 20
+
+
+def test_vlan_create_sorted_ascending() -> None:
+    cur = _cfg()
+    des = _cfg(vlans={30: _vlan(30), 10: _vlan(10), 20: _vlan(20)})
+    plan = build_device_plan(cur, des)
+    kinds = [c.kind for c in plan.changes]
+    assert kinds == ["vlan_create", "vlan_create", "vlan_create"]
+    vids = [c.details["vlan_id"] for c in plan.changes]
+    assert vids == [10, 20, 30]
+
+
+# ---------------------------------------------------------------------------
+# VLAN updates
+# ---------------------------------------------------------------------------
+
+
+def test_vlan_update_name_change() -> None:
+    cur = _cfg(vlans={10: _vlan(10, "old")})
+    des = _cfg(vlans={10: _vlan(10, "new")})
+    plan = build_device_plan(cur, des)
+    assert len(plan.changes) == 1
+    ch = plan.changes[0]
+    assert ch.kind == "vlan_update"
+    assert ch.details["name"] == {"from": "old", "to": "new"}
+
+
+def test_vlan_update_name_suppressed_when_rename_false() -> None:
+    cur = _cfg(vlans={10: _vlan(10, "old")})
+    des = _cfg(vlans={10: _vlan(10, "new")})
+    plan = build_device_plan(cur, des, allow_vlan_rename=False)
+    assert plan.changes == []
+
+
+def test_vlan_update_membership_change() -> None:
+    cur = _cfg(vlans={10: _vlan(10, untagged=[0])})
+    des = _cfg(vlans={10: _vlan(10, untagged=[0, 1])})
+    plan = build_device_plan(cur, des, allow_vlan_membership=True)
+    assert len(plan.changes) == 1
+    assert plan.changes[0].kind == "vlan_update"
+
+
+def test_vlan_update_membership_suppressed_when_flag_false() -> None:
+    cur = _cfg(vlans={10: _vlan(10, untagged=[0])})
+    des = _cfg(vlans={10: _vlan(10, untagged=[0, 1])})
+    plan = build_device_plan(cur, des, allow_vlan_membership=False)
+    assert plan.changes == []
+
+
+# ---------------------------------------------------------------------------
+# VLAN deletes
+# ---------------------------------------------------------------------------
+
+
+def test_vlan_delete_when_allowed() -> None:
+    cur = _cfg(vlans={1: _vlan(1), 10: _vlan(10), 20: _vlan(20)})
+    des = _cfg(vlans={1: _vlan(1)})
+    plan = build_device_plan(cur, des, allow_vlan_delete=True)
+    delete_kinds = [c for c in plan.changes if c.kind == "vlan_delete"]
+    vids = [c.details["vlan_id"] for c in delete_kinds]
+    assert sorted(vids) == [10, 20]
+    # Deletes must be in descending VID order
+    assert vids == [20, 10]
+
+
+def test_vlan_1_never_deleted() -> None:
+    cur = _cfg(vlans={1: _vlan(1), 5: _vlan(5)})
+    des = _cfg()
+    plan = build_device_plan(cur, des, allow_vlan_delete=True)
+    deleted_vids = [c.details["vlan_id"] for c in plan.changes if c.kind == "vlan_delete"]
+    assert 1 not in deleted_vids
+
+
+def test_vlan_delete_suppressed_when_flag_false(recwarn: pytest.WarningsChecker) -> None:
+    cur = _cfg(vlans={10: _vlan(10)})
+    des = _cfg()
+    plan = build_device_plan(cur, des, allow_vlan_delete=False)
+    deletes = [c for c in plan.changes if c.kind == "vlan_delete"]
+    assert deletes == []
+    assert len(recwarn) == 1
+    assert "allow_vlan_delete" in str(recwarn[0].message)
+
+
+# ---------------------------------------------------------------------------
+# Port updates
+# ---------------------------------------------------------------------------
+
+
+def test_port_update_admin_up_change() -> None:
+    cur = _cfg(ports={2: _port(2, admin_up=True, speed="Auto", flow=True)})
+    des = _cfg(ports={2: _port(2, admin_up=False)})
+    plan = build_device_plan(cur, des)
+    assert len(plan.changes) == 1
+    ch = plan.changes[0]
+    assert ch.kind == "port_update"
+    assert ch.key == "port:2"
+    assert ch.details["admin_up"] == {"from": True, "to": False}
+
+
+def test_port_update_speed_duplex_change() -> None:
+    cur = _cfg(ports={1: _port(1, admin_up=True, speed="Auto", flow=True)})
+    des = _cfg(ports={1: _port(1, speed="1000M/Full")})
+    plan = build_device_plan(cur, des)
+    assert plan.changes[0].details["speed_duplex"] == {"from": "Auto", "to": "1000M/Full"}
+
+
+def test_port_update_flow_control_change() -> None:
+    cur = _cfg(ports={3: _port(3, admin_up=True, speed="Auto", flow=True)})
+    des = _cfg(ports={3: _port(3, flow=False)})
+    plan = build_device_plan(cur, des)
+    assert plan.changes[0].details["flow_control"] == {"from": True, "to": False}
+
+
+def test_port_update_none_field_not_diffed() -> None:
+    """None in desired means 'don't care' — no change planned."""
+    cur = _cfg(ports={1: _port(1, admin_up=True, speed="Auto", flow=True)})
+    des = _cfg(ports={1: _port(1)})  # all fields None
+    plan = build_device_plan(cur, des)
+    assert plan.changes == []
+
+
+def test_port_unknown_to_current_skipped() -> None:
+    """Desired port not in current → silently ignored."""
+    cur = _cfg()
+    des = _cfg(ports={99: _port(99, admin_up=True)})
+    plan = build_device_plan(cur, des)
+    assert plan.changes == []
+
+
+# ---------------------------------------------------------------------------
+# safety_port_id
+# ---------------------------------------------------------------------------
+
+
+def test_safety_port_prevents_disable(recwarn: pytest.WarningsChecker) -> None:
+    cur = _cfg(ports={6: _port(6, admin_up=True, speed="Auto", flow=True)})
+    des = _cfg(ports={6: _port(6, admin_up=False)})
+    plan = build_device_plan(cur, des, safety_port_id=6)
+    assert plan.changes == []
+    assert len(recwarn) == 1
+    assert "safety port" in str(recwarn[0].message)
+
+
+def test_safety_port_allows_enable() -> None:
+    cur = _cfg(ports={6: _port(6, admin_up=False, speed="Auto", flow=True)})
+    des = _cfg(ports={6: _port(6, admin_up=True)})
+    plan = build_device_plan(cur, des, safety_port_id=6)
+    assert len(plan.changes) == 1
+    assert plan.changes[0].details["admin_up"] == {"from": False, "to": True}
+
+
+def test_safety_port_allows_speed_change() -> None:
+    cur = _cfg(ports={6: _port(6, admin_up=True, speed="Auto", flow=True)})
+    des = _cfg(ports={6: _port(6, speed="1000M/Full")})
+    plan = build_device_plan(cur, des, safety_port_id=6)
+    assert len(plan.changes) == 1
+    assert "speed_duplex" in plan.changes[0].details
+
+
+def test_no_safety_port_id_does_not_block() -> None:
+    cur = _cfg(ports={6: _port(6, admin_up=True, speed="Auto", flow=True)})
+    des = _cfg(ports={6: _port(6, admin_up=False)})
+    plan = build_device_plan(cur, des, safety_port_id=None)
+    assert len(plan.changes) == 1
+
+
+# ---------------------------------------------------------------------------
+# Change ordering
+# ---------------------------------------------------------------------------
+
+
+def test_change_ordering() -> None:
+    """Creates → updates → port_updates → deletes."""
+    cur = _cfg(
+        vlans={
+            1: _vlan(1),
+            10: _vlan(10, "old"),
+            50: _vlan(50),
+        },
+        ports={2: _port(2, admin_up=True, speed="Auto", flow=True)},
+    )
+    des = _cfg(
+        vlans={
+            1: _vlan(1),
+            10: _vlan(10, "new"),   # update
+            99: _vlan(99, "fresh"),  # create
+        },
+        ports={2: _port(2, admin_up=False)},  # port update
+    )
+    plan = build_device_plan(cur, des, allow_vlan_delete=True)
+    kinds = [c.kind for c in plan.changes]
+    # expected order: create(99), update(10), port_update(2), delete(50)
+    assert kinds.index("vlan_create") < kinds.index("vlan_update")
+    assert kinds.index("vlan_update") < kinds.index("port_update")
+    assert kinds.index("port_update") < kinds.index("vlan_delete")
+
+
+# ---------------------------------------------------------------------------
+# Summary counts
+# ---------------------------------------------------------------------------
+
+
+def test_summary_counts() -> None:
+    cur = _cfg(
+        vlans={10: _vlan(10), 20: _vlan(20)},
+        ports={1: _port(1, admin_up=True, speed="Auto", flow=True)},
+    )
+    des = _cfg(
+        vlans={30: _vlan(30)},  # create 30, delete 10 & 20
+        ports={1: _port(1, admin_up=False)},
+    )
+    plan = build_device_plan(cur, des, allow_vlan_delete=True)
+    assert plan.summary["vlan_create"] == 1
+    assert plan.summary["vlan_update"] == 0
+    assert plan.summary["port_update"] == 1
+    assert plan.summary["vlan_delete"] == 2
