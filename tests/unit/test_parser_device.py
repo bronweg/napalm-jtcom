@@ -222,3 +222,13 @@ def test_uptime_none_returns_zero() -> None:
 
 def test_uptime_unparseable_returns_zero() -> None:
     assert parse_uptime_seconds("unknown") == pytest.approx(0.0)
+
+def test_uptime_compact_xd_format() -> None:
+    """Real JTCom switch uptime format: '0D 14H:36M:26S'."""
+    assert parse_uptime_seconds("0D 14H:36M:26S") == pytest.approx(14 * 3600 + 36 * 60 + 26)
+
+
+def test_uptime_compact_nonzero_days() -> None:
+    """Compact format with non-zero days."""
+    expected = 3 * 86400 + 2 * 3600 + 10 * 60 + 5
+    assert parse_uptime_seconds("3D 2H:10M:05S") == pytest.approx(expected)

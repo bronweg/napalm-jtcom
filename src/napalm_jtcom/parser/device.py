@@ -59,6 +59,12 @@ _UPTIME_RE: re.Pattern[str] = re.compile(
     r"(?:(\d+)\s*days?\s*[,]?\s*)?(\d+):(\d+):(\d+)"
 )
 
+# Uptime compact format: "XD YH:ZM:WS" (e.g. "0D 14H:36M:26S")
+_UPTIME_RE2: re.Pattern[str] = re.compile(
+    r"(\d+)D\s*(\d+)H:(\d+)M:(\d+)S",
+    re.IGNORECASE,
+)
+
 
 def parse_device_info(html: str) -> DeviceInfo:
     """Parse the device information page into a :class:`.DeviceInfo`.
@@ -129,7 +135,8 @@ def _build_device_info(fields: dict[str, str]) -> DeviceInfo:
 def parse_uptime_seconds(uptime_str: str | None) -> float:
     """Convert a raw uptime string to total seconds.
 
-    Supports formats like ``"7 days, 03:42:11"`` and ``"03:42:11"``.
+    Supports formats like ``"7 days, 03:42:11"``, ``"03:42:11"``, and
+    the compact switch format ``"0D 14H:36M:26S"``.
     Returns ``0.0`` if *uptime_str* is ``None`` or cannot be parsed.
 
     Args:
@@ -140,6 +147,15 @@ def parse_uptime_seconds(uptime_str: str | None) -> float:
     """
     if not uptime_str:
         return 0.0
+    # Try compact "XD YH:ZM:WS" format first (real JTCom switch format)
+    m2 = _UPTIME_RE2.search(uptime_str)
+    if m2:
+        days = int(m2.group(1))
+        hours = int(m2.group(2))
+        minutes = int(m2.group(3))
+        seconds = int(m2.group(4))
+        return float(days * 86400 + hours * 3600 + minutes * 60 + seconds)
+    # Fall back to "N days, HH:MM:SS" format
     m = _UPTIME_RE.search(uptime_str)
     if not m:
         return 0.0
