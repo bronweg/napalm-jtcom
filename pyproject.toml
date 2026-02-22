@@ -44,6 +44,9 @@ Homepage = "https://github.com/bronweg/napalm-jtcom"
 Repository = "https://github.com/bronweg/napalm-jtcom"
 "Bug Tracker" = "https://github.com/bronweg/napalm-jtcom/issues"
 
+[project.entry-points."napalm.drivers"]
+jtcom = "napalm_jtcom.driver:JTComDriver"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/napalm_jtcom"]
 

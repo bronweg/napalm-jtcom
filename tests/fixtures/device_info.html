@@ -1,9 +1,24 @@
 <!DOCTYPE html>
 <html>
-<head><title>Placeholder — device_info</title></head>
+<head>
+  <meta charset="utf-8">
+  <title>System Information</title>
+</head>
 <body>
-  <!-- Replace this file with a real HTML snapshot captured from a JTCom switch.
-       See tests/fixtures/README.md for instructions. -->
-  <p>Placeholder for device_info.html</p>
+<form method="post" action="/cgi-bin/system_info.cgi">
+<input type="hidden" name="page" value="inside">
+<table border="1" width="600" cellspacing="0" cellpadding="4">
+  <tr bgcolor="#d0d0d0"><th colspan="2">System Information</th></tr>
+  <tr><td>System Name</td><td>JTCom-Switch</td></tr>
+  <tr><td>MAC Address</td><td>A8:F7:E0:12:34:56</td></tr>
+  <tr><td>IP Address</td><td>192.168.61.10</td></tr>
+  <tr><td>Subnet Mask</td><td>255.255.255.0</td></tr>
+  <tr><td>Default Gateway</td><td>192.168.61.1</td></tr>
+  <tr><td>Model</td><td>JTCom-S1024G</td></tr>
+  <tr><td>Serial Number</td><td>JTC20240001234</td></tr>
+  <tr><td>Firmware Version</td><td>v2.3.1-20240115</td></tr>
+  <tr><td>Uptime</td><td>7 days, 03:42:11</td></tr>
+</table>
+</form>
 </body>
 </html>
