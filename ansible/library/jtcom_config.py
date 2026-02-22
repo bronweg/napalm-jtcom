@@ -1,72 +1,14 @@
 #!/usr/bin/python3
 # Copyright: (c) 2024, napalm-jtcom contributors
 # SPDX-License-Identifier: Apache-2.0
-"""Ansible module: jtcom_config — idempotent configuration for JTCom CGI switches."""
+"""Ansible module stub: jtcom_config.
+
+All execution logic lives in action_plugins/jtcom_config.py which runs in the
+Ansible controller Python process and imports napalm_jtcom directly.
+This file exists only for argument documentation (ansible-doc, Galaxy, IDEs).
+"""
 
 from __future__ import annotations
-
-import os
-import sys
-
-
-# ---------------------------------------------------------------------------
-# Bootstrap: re-exec under the venv Python if napalm_jtcom is not importable.
-# Ansible 2.20 hardcodes /usr/bin/python3 for localhost module execution
-# regardless of ansible_python_interpreter.  When VIRTUAL_ENV is set (either
-# by activating the venv or passing it explicitly), we transparently re-exec
-# the AnsiballZ wrapper under the correct interpreter so all dependencies are
-# available.
-#
-# NOTE: sys.argv[0] inside AnsiballZ is a synthetic zip path such as
-#   ".../ansible_jtcom_config_payload.zip/ansible/legacy/jtcom_config.py"
-# which is NOT a real filesystem path.  We therefore recover the actual
-# AnsiballZ wrapper path by querying the OS process table via ``ps``.
-# ---------------------------------------------------------------------------
-def _bootstrap_venv() -> None:
-    import subprocess
-
-    try:
-        import napalm_jtcom  # noqa: F401  # type: ignore[import-untyped]
-
-        return  # Already running under the right Python.
-    except ImportError:
-        pass
-
-    venv = os.environ.get("VIRTUAL_ENV", "")
-    if not venv:
-        return  # No hint; fall through and let AnsibleModule surface the error.
-
-    candidate = os.path.join(venv, "bin", "python3")
-    if candidate == sys.executable:
-        return  # Already this Python; nothing to do.
-    if not (os.path.isfile(candidate) and os.access(candidate, os.X_OK)):
-        return
-
-    # Recover the real AnsiballZ wrapper path from the OS process table.
-    # Expected cmdline: '/usr/bin/python3 /path/.ansible/tmp/.../AnsiballZ_jtcom_config.py'
-    script: str | None = None
-    try:
-        result = subprocess.run(
-            ["ps", "-p", str(os.getpid()), "-o", "command="],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        for part in reversed(result.stdout.strip().split()):
-            if os.path.isfile(part) and "AnsiballZ" in part:
-                script = part
-                break
-    except Exception:  # noqa: BLE001
-        pass
-
-    if script:
-        # Replace the current process with the venv Python running AnsiballZ.
-        os.execv(candidate, [candidate, script])
-    # Fall through — AnsibleModule will surface the ImportError.
-
-
-_bootstrap_venv()
-
 
 DOCUMENTATION = r"""
 ---
@@ -202,107 +144,27 @@ applied:
 from ansible.module_utils.basic import AnsibleModule  # noqa: E402
 
 
-def _build_desired_config(vlans_param: dict | None, ports_param: dict | None) -> object:  # type: ignore[type-arg]
-    """Convert module params into a DeviceConfig instance."""
-    # Import here so import errors surface as fail_json, not as a module crash
-    from napalm_jtcom.model.config import DeviceConfig
-    from napalm_jtcom.model.port import PortConfig
-    from napalm_jtcom.model.vlan import VlanConfig
-
-    vlans = {}
-    for key, entry in (vlans_param or {}).items():
-        vid = int(key)
-        entry = entry or {}
-        vlans[vid] = VlanConfig(
-            vlan_id=vid,
-            name=entry.get("name", ""),
-            tagged_ports=[int(p) for p in entry.get("tagged_ports", [])],
-            untagged_ports=[int(p) for p in entry.get("untagged_ports", [])],
-        )
-
-    ports = {}
-    for key, entry in (ports_param or {}).items():
-        pid = int(key)
-        entry = entry or {}
-        ports[pid] = PortConfig(
-            port_id=pid,
-            admin_up=entry.get("admin_up"),
-            speed_duplex=entry.get("speed_duplex"),
-            flow_control=entry.get("flow_control"),
-        )
-
-    return DeviceConfig(vlans=vlans, ports=ports)
-
-
-def run_module() -> None:
-    argument_spec = dict(
-        host=dict(type="str", required=True),
-        username=dict(type="str", required=True),
-        password=dict(type="str", required=True, no_log=True),
-        port=dict(type="int"),
-        verify_tls=dict(type="bool", default=False),
-        backup_before_change=dict(type="bool", default=True),
-        safety_port_id=dict(type="int", default=6),
-        allow_vlan_delete=dict(type="bool", default=False),
-        allow_vlan_membership=dict(type="bool", default=True),
-        allow_vlan_rename=dict(type="bool", default=True),
-        vlans=dict(type="dict"),
-        ports=dict(type="dict"),
-    )
-
+def main() -> None:
     module = AnsibleModule(
-        argument_spec=argument_spec,
+        argument_spec=dict(
+            host=dict(type="str", required=True),
+            username=dict(type="str", required=True),
+            password=dict(type="str", required=True, no_log=True),
+            port=dict(type="int"),
+            verify_tls=dict(type="bool", default=False),
+            backup_before_change=dict(type="bool", default=True),
+            safety_port_id=dict(type="int", default=6),
+            allow_vlan_delete=dict(type="bool", default=False),
+            allow_vlan_membership=dict(type="bool", default=True),
+            allow_vlan_rename=dict(type="bool", default=True),
+            vlans=dict(type="dict"),
+            ports=dict(type="dict"),
+        ),
         supports_check_mode=True,
     )
-
-    p = module.params
-
-    # Build optional_args for the driver
-    optional_args: dict = {
-        "verify_tls": p["verify_tls"],
-        "backup_before_change": p["backup_before_change"],
-        "safety_port_id": p["safety_port_id"],
-    }
-    if p["port"] is not None:
-        optional_args["port"] = p["port"]
-
-    try:
-        from napalm_jtcom.driver import JTComDriver
-
-        desired = _build_desired_config(p["vlans"], p["ports"])
-
-        driver = JTComDriver(
-            hostname=p["host"],
-            username=p["username"],
-            password=p["password"],
-            optional_args=optional_args,
-        )
-        driver.open()
-        try:
-            result = driver.apply_device_config(
-                desired,
-                check_mode=module.check_mode,
-                allow_vlan_delete=p["allow_vlan_delete"],
-                allow_vlan_membership=p["allow_vlan_membership"],
-                allow_vlan_rename=p["allow_vlan_rename"],
-            )
-        finally:
-            driver.close()
-
-    except Exception as exc:
-        module.fail_json(msg=str(exc))
-        return
-
-    module.exit_json(
-        changed=result["changed"],
-        diff=result["diff"],
-        backup_file=result.get("backup_file", ""),
-        applied=result.get("applied", []),
-    )
-
-
-def main() -> None:
-    run_module()
+    # Execution is handled entirely by action_plugins/jtcom_config.py.
+    # This stub is reached only when the action plugin is absent.
+    module.fail_json(msg="jtcom_config action plugin not found. Check action_plugins path.")
 
 
 if __name__ == "__main__":
