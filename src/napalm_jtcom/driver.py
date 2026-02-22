@@ -10,12 +10,15 @@ from typing import Any
 from napalm.base.base import NetworkDriver
 
 from napalm_jtcom.client.errors import JTComError
+from napalm_jtcom.client.port_ops import apply_port_changes
 from napalm_jtcom.client.session import JTComCredentials, JTComSession
 from napalm_jtcom.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
+from napalm_jtcom.model.port import PortChangeSet, PortConfig
 from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
 from napalm_jtcom.parser.device import parse_device_info, parse_uptime_seconds
 from napalm_jtcom.parser.port import parse_port_page
 from napalm_jtcom.parser.vlan import parse_port_vlan_settings, parse_static_vlans
+from napalm_jtcom.utils.port_diff import plan_port_changes
 from napalm_jtcom.utils.vlan_diff import plan_vlan_changes
 from napalm_jtcom.vendor.jtcom.endpoints import (
     DEVICE_INFO,
@@ -366,6 +369,90 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         if change_set.delete:
             vlan_delete(session, sorted(change_set.delete, reverse=True))
             logger.info("Deleted VLANs %s", sorted(change_set.delete, reverse=True))
+
+        return result
+
+
+    def set_interfaces(
+        self,
+        desired_ports: list[PortConfig],
+        *,
+        dry_run: bool = False,
+        backup_before_change: bool | None = None,
+    ) -> dict[str, Any]:
+        """Apply declarative port configuration to the switch.
+
+        Computes the difference between the current port state and
+        *desired_ports*, optionally saves a binary configuration backup,
+        then applies the necessary changes to each port.
+
+        Only the non-``None`` fields in each :class:`~.PortConfig` are
+        changed; ``None`` fields preserve the current switch value.
+
+        Args:
+            desired_ports: List of :class:`~.PortConfig` representing the
+                desired state for each port to be configured.
+            dry_run: If ``True``, compute and return the change plan without
+                applying anything to the switch.
+            backup_before_change: Override the ``backup_before_change``
+                optional_arg for this call.  ``None`` means use the
+                optional_args value (default ``True``).
+
+        Returns:
+            A dict with keys:
+
+            - ``"backup_file"`` – path to the saved backup, or ``""`` if
+              skipped.
+            - ``"updated_ports"`` – list of port IDs (1-based) that were
+              (or would be) reconfigured.
+
+        Raises:
+            JTComError: If the session is not open.
+            JTComSwitchError: If any switch operation returns a non-zero code.
+        """
+        session = self._require_session()
+
+        # --- Fetch current state ---
+        html = session.get(PORT_SETTINGS)
+        settings_list, _ = parse_port_page(html)
+
+        # --- Plan changes ---
+        change_set: PortChangeSet = plan_port_changes(settings_list, desired_ports)
+
+        result: dict[str, Any] = {
+            "backup_file": "",
+            "updated_ports": [cfg.port_id for cfg in change_set.update],
+        }
+
+        if dry_run:
+            return result
+
+        if not change_set.update:
+            return result
+
+        # --- Backup before change ---
+        do_backup = (
+            backup_before_change
+            if backup_before_change is not None
+            else bool(self.optional_args.get("backup_before_change", True))
+        )
+        if do_backup:
+            backup_dir = pathlib.Path(
+                str(self.optional_args.get("backup_dir", "./backups"))
+            )
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            safe_host = self.hostname.replace("://", "_").replace("/", "_").replace(":", "_")
+            filename = f"jtcom_{safe_host}_{ts}_switch_cfg.bin"
+            backup_path = backup_dir / filename
+            raw = session.download_config_backup()
+            backup_path.write_bytes(raw)
+            result["backup_file"] = str(backup_path)
+            logger.info("Config backup saved to %s (%d bytes)", backup_path, len(raw))
+
+        # --- Apply changes in ascending port_id order ---
+        apply_port_changes(session, settings_list, change_set)
+        logger.info("Port changes applied: %s", result["updated_ports"])
 
         return result
 

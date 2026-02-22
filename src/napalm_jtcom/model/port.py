@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -42,3 +42,39 @@ class PortOperStatus:
     link_up: bool | None = None
     negotiated_speed_mbps: int | None = None
     duplex: str | None = None
+
+
+@dataclass
+class PortConfig:
+    """Desired configuration for a single switch port.
+
+    Used as input to :func:`~napalm_jtcom.utils.port_diff.plan_port_changes`.
+    Any field set to ``None`` means "do not change this attribute".
+
+    Attributes:
+        port_id: 1-based port number, matching :attr:`PortSettings.port_id`.
+        admin_up: ``True`` to enable the port, ``False`` to disable it,
+            ``None`` to leave unchanged.
+        speed_duplex: Configured speed/duplex token as shown in the switch UI
+            (e.g. ``"Auto"``, ``"1000M/Full"``), or ``None`` to leave unchanged.
+        flow_control: ``True`` to enable flow control, ``False`` to disable,
+            ``None`` to leave unchanged.
+    """
+
+    port_id: int
+    admin_up: bool | None = None
+    speed_duplex: str | None = None
+    flow_control: bool | None = None
+
+
+@dataclass
+class PortChangeSet:
+    """A set of planned port configuration changes.
+
+    Attributes:
+        update: Ports whose configuration differs from the desired state.
+            Sorted ascending by :attr:`PortConfig.port_id`.
+    """
+
+    update: list[PortConfig] = field(default_factory=list)
+
