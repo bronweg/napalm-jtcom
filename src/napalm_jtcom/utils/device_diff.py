@@ -1,8 +1,15 @@
 """Device-level diff / plan engine for napalm-jtcom.
 
 Compares a *current* :class:`~napalm_jtcom.model.config.DeviceConfig` against
-a *desired* one and produces an ordered :class:`DevicePlan` with the minimal
-set of changes needed to reach *desired*.
+a *desired* incremental-change config and produces an ordered
+:class:`DevicePlan` with the minimal set of changes needed.
+
+Each VLAN/port entry in *desired* carries a ``state`` field:
+
+- ``"present"`` — create or update to match the given attributes.
+- ``"absent"`` — delete the VLAN (ports: administratively disable).
+
+Items **not** mentioned in *desired* are left completely untouched.
 """
 
 from __future__ import annotations
@@ -55,23 +62,35 @@ def build_device_plan(
     current: DeviceConfig,
     desired: DeviceConfig,
     *,
-    allow_vlan_delete: bool = False,
-    allow_vlan_membership: bool = True,
-    allow_vlan_rename: bool = True,
     safety_port_id: int | None = None,
 ) -> DevicePlan:
-    """Compute the minimal ordered plan to move *current* to *desired*.
+    """Compute the minimal ordered plan from the explicit *desired* entries.
+
+    Only VLANs and ports listed in *desired* are considered; unlisted items
+    are never touched.  The ``state`` field on each entry controls intent:
+
+    **VLANs**:
+
+    - ``state="present"`` + not in *current* → ``vlan_create``.
+    - ``state="present"`` + in *current* + name or membership differs
+      → ``vlan_update``.
+    - ``state="absent"`` + in *current* + ``vlan_id != 1`` → ``vlan_delete``.
+    - ``state="absent"`` + not in *current* → no-op.
+    - VLAN 1 is **never** deleted.
+
+    **Ports**:
+
+    - ``state="present"`` — compare each non-``None`` field; emit
+      ``port_update`` if any differs.
+    - ``state="absent"`` — disable the port (``admin_up=False``).
+    - In both cases: if ``safety_port_id`` matches, disabling is silently skipped.
 
     Args:
         current: Current device config (as read from the switch).
-        desired: Desired device config.
-        allow_vlan_delete: Include ``vlan_delete`` changes for VLANs present in
-            *current* but absent from *desired*.  VLAN 1 is never deleted.
-        allow_vlan_membership: Include port membership differences in VLAN
-            update detection.
-        allow_vlan_rename: Include VLAN name differences in update detection.
+        desired: Desired incremental-change config.
         safety_port_id: 1-based port ID that must never be disabled.  A desired
-            change that sets ``admin_up=False`` for this port is silently skipped.
+            change that would set ``admin_up=False`` for this port is silently
+            skipped (with a warning).
 
     Returns:
         A :class:`DevicePlan` with changes in apply order.
@@ -84,6 +103,19 @@ def build_device_plan(
     # ------------------------------------------------------------------ VLANs
     for vid in sorted(desired.vlans):
         cfg = desired.vlans[vid]
+
+        if cfg.state == "absent":
+            if vid in current.vlans and vid != 1:
+                deletes.append(
+                    Change(
+                        kind="vlan_delete",
+                        key=f"vlan:{vid}",
+                        details={"vlan_id": vid},
+                    )
+                )
+            continue
+
+        # state == "present"
         if vid not in current.vlans:
             creates.append(
                 Change(
@@ -102,20 +134,19 @@ def build_device_plan(
         entry = current.vlans[vid]
         diffs: dict[str, Any] = {}
 
-        if allow_vlan_rename and cfg.name is not None and cfg.name != entry.name:
+        if cfg.name is not None and cfg.name != entry.name:
             diffs["name"] = {"from": entry.name, "to": cfg.name}
 
-        if allow_vlan_membership:
-            if sorted(cfg.tagged_ports) != sorted(entry.tagged_ports):
-                diffs["tagged_ports"] = {
-                    "from": sorted(entry.tagged_ports),
-                    "to": sorted(cfg.tagged_ports),
-                }
-            if sorted(cfg.untagged_ports) != sorted(entry.untagged_ports):
-                diffs["untagged_ports"] = {
-                    "from": sorted(entry.untagged_ports),
-                    "to": sorted(cfg.untagged_ports),
-                }
+        if sorted(cfg.tagged_ports) != sorted(entry.tagged_ports):
+            diffs["tagged_ports"] = {
+                "from": sorted(entry.tagged_ports),
+                "to": sorted(cfg.tagged_ports),
+            }
+        if sorted(cfg.untagged_ports) != sorted(entry.untagged_ports):
+            diffs["untagged_ports"] = {
+                "from": sorted(entry.untagged_ports),
+                "to": sorted(cfg.untagged_ports),
+            }
 
         if diffs:
             updates.append(
@@ -135,26 +166,33 @@ def build_device_plan(
 
         field_diffs: dict[str, Any] = {}
 
-        if cfg_p.admin_up is not None and cfg_p.admin_up != cur_p.admin_up:
-            if not cfg_p.admin_up and safety_port_id is not None and pid == safety_port_id:
+        if cfg_p.state == "absent":
+            # "absent" on a port = administratively disable it
+            effective_admin_up: bool | None = False
+        else:
+            effective_admin_up = cfg_p.admin_up
+
+        if effective_admin_up is not None and effective_admin_up != cur_p.admin_up:
+            if not effective_admin_up and safety_port_id is not None and pid == safety_port_id:
                 warnings.warn(
                     f"Refusing to disable safety port {pid}; skipping admin_up change.",
                     stacklevel=2,
                 )
             else:
-                field_diffs["admin_up"] = {"from": cur_p.admin_up, "to": cfg_p.admin_up}
+                field_diffs["admin_up"] = {"from": cur_p.admin_up, "to": effective_admin_up}
 
-        if cfg_p.speed_duplex is not None and cfg_p.speed_duplex != cur_p.speed_duplex:
-            field_diffs["speed_duplex"] = {
-                "from": cur_p.speed_duplex,
-                "to": cfg_p.speed_duplex,
-            }
+        if cfg_p.state == "present":
+            if cfg_p.speed_duplex is not None and cfg_p.speed_duplex != cur_p.speed_duplex:
+                field_diffs["speed_duplex"] = {
+                    "from": cur_p.speed_duplex,
+                    "to": cfg_p.speed_duplex,
+                }
 
-        if cfg_p.flow_control is not None and cfg_p.flow_control != cur_p.flow_control:
-            field_diffs["flow_control"] = {
-                "from": cur_p.flow_control,
-                "to": cfg_p.flow_control,
-            }
+            if cfg_p.flow_control is not None and cfg_p.flow_control != cur_p.flow_control:
+                field_diffs["flow_control"] = {
+                    "from": cur_p.flow_control,
+                    "to": cfg_p.flow_control,
+                }
 
         if field_diffs:
             port_changes.append(
@@ -165,29 +203,10 @@ def build_device_plan(
                 )
             )
 
-    # ---------------------------------------------------------------- Deletes
-    if allow_vlan_delete:
-        for vid in sorted(current.vlans, reverse=True):
-            if vid == 1:
-                continue
-            if vid not in desired.vlans:
-                deletes.append(
-                    Change(
-                        kind="vlan_delete",
-                        key=f"vlan:{vid}",
-                        details={"vlan_id": vid},
-                    )
-                )
-    else:
-        extra = sorted(v for v in current.vlans if v not in desired.vlans and v != 1)
-        if extra:
-            warnings.warn(
-                f"VLANs {extra} exist on the device but are absent from the desired config; "
-                "pass allow_vlan_delete=True to remove them.",
-                stacklevel=2,
-            )
+    # Deletes are collected in ascending order above; apply in descending VID order
+    deletes_desc = list(reversed(deletes))
 
-    all_changes = creates + updates + port_changes + deletes
+    all_changes = creates + updates + port_changes + deletes_desc
     summary: dict[str, int] = {
         "vlan_create": len(creates),
         "vlan_update": len(updates),

@@ -47,6 +47,7 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 name=entry.get("name", ""),
                 tagged_ports=[int(x) for x in entry.get("tagged_ports", [])],
                 untagged_ports=[int(x) for x in entry.get("untagged_ports", [])],
+                state=entry.get("state", "present"),
             )
 
         ports: dict[int, Any] = {}
@@ -58,6 +59,7 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 admin_up=entry.get("admin_up"),
                 speed_duplex=entry.get("speed_duplex"),
                 flow_control=entry.get("flow_control"),
+                state=entry.get("state", "present"),
             )
 
         desired = DeviceConfig(vlans=vlans, ports=ports)
@@ -82,9 +84,6 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 cfg_result = driver.apply_device_config(
                     desired,
                     check_mode=self._play_context.check_mode,
-                    allow_vlan_delete=p.get("allow_vlan_delete", False),
-                    allow_vlan_membership=p.get("allow_vlan_membership", True),
-                    allow_vlan_rename=p.get("allow_vlan_rename", True),
                 )
             finally:
                 driver.close()

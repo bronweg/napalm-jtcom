@@ -245,26 +245,22 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         desired_vlans: dict[int, VlanConfig],
         *,
         dry_run: bool = False,
-        allow_delete: bool = False,
-        allow_membership: bool = False,
-        allow_rename: bool = True,
     ) -> dict[str, Any]:
-        """Apply a declarative VLAN configuration to the switch.
+        """Apply an incremental VLAN change plan to the switch.
 
         Computes the difference between the current VLAN state and *desired_vlans*,
         optionally saves a binary configuration backup, then creates / updates /
         deletes VLANs as needed.
 
+        Each entry in *desired_vlans* must carry a ``state`` field:
+        ``"present"`` to create or update, ``"absent"`` to delete.
+        VLANs not listed in *desired_vlans* are left untouched.
+
         Args:
             desired_vlans: Mapping of VLAN ID → :class:`~napalm_jtcom.model.vlan.VlanConfig`
-                representing the target state.
+                representing the incremental change.
             dry_run: If ``True``, compute and return the change plan without
                 applying anything to the switch.
-            allow_delete: Allow deletion of VLANs present on the switch but absent
-                from *desired_vlans*.  VLAN 1 is never deleted.
-            allow_membership: Include port-membership differences in update detection.
-            allow_rename: Include VLAN name differences in update detection
-                (default ``True``).
 
         Returns:
             A dict with keys:
@@ -303,14 +299,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
                         entry.tagged_ports.append(pc.port_name)
 
         # --- Plan changes ---
-        change_set = plan_vlan_changes(
-            vlan_map,
-            desired_vlans,
-            allow_delete=allow_delete,
-            allow_membership=allow_membership,
-            allow_rename=allow_rename,
-            _warn_stacklevel=3,
-        )
+        change_set = plan_vlan_changes(vlan_map, desired_vlans)
 
         result: dict[str, Any] = {
             "backup_file": "",
@@ -348,26 +337,25 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             logger.info("Updated VLAN %d (%s)", cfg.vlan_id, cfg.name)
 
         # --- Apply membership changes ---
-        if allow_membership:
-            for cfg in change_set.create + change_set.update:
-                if cfg.untagged_ports:
-                    vlan_set_port(
-                        session,
-                        port_ids=cfg.untagged_ports,
-                        vlan_type="access",
-                        access_vlan=cfg.vlan_id,
-                        native_vlan=None,
-                        permit_vlans=[],
-                    )
-                if cfg.tagged_ports:
-                    vlan_set_port(
-                        session,
-                        port_ids=cfg.tagged_ports,
-                        vlan_type="trunk",
-                        access_vlan=None,
-                        native_vlan=1,
-                        permit_vlans=[cfg.vlan_id],
-                    )
+        for cfg in change_set.create + change_set.update:
+            if cfg.untagged_ports:
+                vlan_set_port(
+                    session,
+                    port_ids=cfg.untagged_ports,
+                    vlan_type="access",
+                    access_vlan=cfg.vlan_id,
+                    native_vlan=None,
+                    permit_vlans=[],
+                )
+            if cfg.tagged_ports:
+                vlan_set_port(
+                    session,
+                    port_ids=cfg.tagged_ports,
+                    vlan_type="trunk",
+                    access_vlan=None,
+                    native_vlan=1,
+                    permit_vlans=[cfg.vlan_id],
+                )
 
         # --- Apply deletes (descending VID) ---
         if change_set.delete:
@@ -466,24 +454,21 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         desired: DeviceConfig,
         *,
         check_mode: bool = False,
-        allow_vlan_delete: bool = False,
-        allow_vlan_membership: bool = True,
-        allow_vlan_rename: bool = True,
         backup_before_change: bool | None = None,
     ) -> dict[str, Any]:
-        """Apply a canonical device configuration to the switch idempotently.
+        """Apply an incremental device configuration to the switch idempotently.
 
         Reads the current switch state, normalizes both current and desired
         configs, computes a deterministic change plan, and applies only what
         has changed.  A post-apply read-back verifies the result.
 
+        Each VLAN/port entry in *desired* carries a ``state`` field:
+        ``"present"`` to create or update, ``"absent"`` to delete/disable.
+        Items not listed in *desired* are left untouched.
+
         Args:
-            desired: Target :class:`~napalm_jtcom.model.config.DeviceConfig`.
+            desired: Incremental :class:`~napalm_jtcom.model.config.DeviceConfig`.
             check_mode: If ``True``, return the plan without applying anything.
-            allow_vlan_delete: Allow deletion of VLANs absent from *desired*.
-                VLAN 1 is never deleted.
-            allow_vlan_membership: Include port membership changes in the plan.
-            allow_vlan_rename: Include VLAN name changes in the plan.
             backup_before_change: Override the ``backup_before_change`` optional
                 arg.  ``None`` means use the optional_args value (default ``True``).
 
@@ -513,9 +498,6 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         plan = build_device_plan(
             current_n,
             desired_n,
-            allow_vlan_delete=allow_vlan_delete,
-            allow_vlan_membership=allow_vlan_membership,
-            allow_vlan_rename=allow_vlan_rename,
             safety_port_id=safety_port_id,
         )
         diff = render_diff(plan)
@@ -542,25 +524,24 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
                 vc = desired_n.vlans[vid]
                 vlan_create(session, vc.vlan_id, vc.name)
                 logger.info("%s VLAN %d (%s)", change.kind, vid, vc.name)
-                if allow_vlan_membership:
-                    if vc.untagged_ports:
-                        vlan_set_port(
-                            session,
-                            port_ids=vc.untagged_ports,
-                            vlan_type="access",
-                            access_vlan=vc.vlan_id,
-                            native_vlan=None,
-                            permit_vlans=[],
-                        )
-                    if vc.tagged_ports:
-                        vlan_set_port(
-                            session,
-                            port_ids=vc.tagged_ports,
-                            vlan_type="trunk",
-                            access_vlan=None,
-                            native_vlan=1,
-                            permit_vlans=[vc.vlan_id],
-                        )
+                if vc.untagged_ports:
+                    vlan_set_port(
+                        session,
+                        port_ids=vc.untagged_ports,
+                        vlan_type="access",
+                        access_vlan=vc.vlan_id,
+                        native_vlan=None,
+                        permit_vlans=[],
+                    )
+                if vc.tagged_ports:
+                    vlan_set_port(
+                        session,
+                        port_ids=vc.tagged_ports,
+                        vlan_type="trunk",
+                        access_vlan=None,
+                        native_vlan=1,
+                        permit_vlans=[vc.vlan_id],
+                    )
             elif change.kind == "vlan_delete":
                 vid = change.details["vlan_id"]
                 vlan_delete(session, [vid])
@@ -580,9 +561,6 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         residual_plan = build_device_plan(
             post_n,
             desired_n,
-            allow_vlan_delete=allow_vlan_delete,
-            allow_vlan_membership=allow_vlan_membership,
-            allow_vlan_rename=allow_vlan_rename,
             safety_port_id=safety_port_id,
         )
         if residual_plan.changes:

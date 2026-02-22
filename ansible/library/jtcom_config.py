@@ -49,31 +49,20 @@ options:
       Defaults to 6.
     type: int
     default: 6
-  allow_vlan_delete:
-    description: >
-      Allow deletion of VLANs present on the device but absent from I(vlans).
-      VLAN 1 is never deleted regardless of this flag.
-    type: bool
-    default: false
-  allow_vlan_membership:
-    description: Include port-membership differences in the VLAN change plan.
-    type: bool
-    default: true
-  allow_vlan_rename:
-    description: Include VLAN name differences in the change plan.
-    type: bool
-    default: true
   vlans:
     description: >
-      Desired VLAN configuration, keyed by VLAN ID (string or int).
-      Each entry may contain C(name), C(tagged_ports), and C(untagged_ports).
-      Ports are 0-based indices as used by the switch CGI.
+      Incremental VLAN changes, keyed by VLAN ID (string or int).
+      Each entry may contain C(name), C(tagged_ports), C(untagged_ports),
+      and C(state) (C(present) or C(absent)).  Ports are 0-based indices.
+      Omitting C(state) defaults to C(present).  VLANs not listed are untouched.
     type: dict
   ports:
     description: >
-      Desired port configuration, keyed by 1-based port ID (string or int).
+      Incremental port changes, keyed by 1-based port ID (string or int).
       Each entry may contain C(admin_up) (bool), C(speed_duplex) (str),
-      and C(flow_control) (bool).  Omit a field to leave it unchanged.
+      C(flow_control) (bool), and C(state) (C(present) or C(absent)).
+      C(state: absent) administratively disables the port.
+      Ports not listed are untouched.
     type: dict
 notes:
   - Run this module on the Ansible controller (C(connection: local)).
@@ -99,24 +88,28 @@ EXAMPLES = r"""
         untagged_ports: [2, 3]
   check_mode: true
 
-- name: Apply VLAN and port config
+- name: Apply VLAN and port config (incremental)
   jtcom_config:
     host: 192.168.51.21
     username: admin
     password: admin
-    allow_vlan_delete: false
     vlans:
       10:
         name: Management
         untagged_ports: [0]
+        state: present
       20:
         name: Data
         untagged_ports: [1, 2, 3]
+        state: present
+      99:
+        state: absent   # delete VLAN 99 if it exists
     ports:
       1:
         admin_up: true
         speed_duplex: Auto
         flow_control: false
+        state: present
 """
 
 RETURN = r"""
@@ -154,9 +147,6 @@ def main() -> None:
             verify_tls=dict(type="bool", default=False),
             backup_before_change=dict(type="bool", default=True),
             safety_port_id=dict(type="int", default=6),
-            allow_vlan_delete=dict(type="bool", default=False),
-            allow_vlan_membership=dict(type="bool", default=True),
-            allow_vlan_rename=dict(type="bool", default=True),
             vlans=dict(type="dict"),
             ports=dict(type="dict"),
         ),

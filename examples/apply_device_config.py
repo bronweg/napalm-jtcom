@@ -7,9 +7,9 @@ Usage (dry-run, default):
 Usage (live apply):
     APPLY=1 python examples/apply_device_config.py
 
-The script builds a minimal desired DeviceConfig that:
-  - Keeps VLAN 1 (management) as-is.
-  - Adds VLAN 100 named "example" (creates it if absent, updates name if present).
+The script builds an incremental DeviceConfig that:
+  - Creates/updates VLAN 100 named "example" (state=present).
+  - Leaves VLAN 1 and all other VLANs untouched (not listed in desired).
   - Leaves all ports at their current settings (no port changes).
 
 Set APPLY=1 only when you are ready to push changes to the switch.
@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import pprint
 
-from napalm_jtcom.driver import JTComNetworkDriver
+from napalm_jtcom.driver import JTComDriver
 from napalm_jtcom.model.config import DeviceConfig
 from napalm_jtcom.model.vlan import VlanConfig
 
@@ -34,8 +34,9 @@ APPLY = os.getenv("APPLY", "0") == "1"
 # ---------------------------------------------------------------------------
 desired = DeviceConfig(
     vlans={
-        1: VlanConfig(vlan_id=1, name="Default"),
-        100: VlanConfig(vlan_id=100, name="example"),
+        100: VlanConfig(vlan_id=100, name="example", state="present"),
+        # Add more entries with state="absent" to delete VLANs.
+        # VLANs not listed here are left completely untouched.
     },
     # Leave ports empty → no port changes will be planned.
     ports={},
@@ -44,7 +45,7 @@ desired = DeviceConfig(
 # ---------------------------------------------------------------------------
 # Connect and apply (or dry-run)
 # ---------------------------------------------------------------------------
-driver = JTComNetworkDriver(
+driver = JTComDriver(
     hostname=HOST,
     username=USERNAME,
     password=PASSWORD,
@@ -57,9 +58,6 @@ try:
     result = driver.apply_device_config(
         desired,
         check_mode=not APPLY,
-        allow_vlan_delete=False,
-        allow_vlan_membership=True,
-        allow_vlan_rename=True,
     )
 finally:
     driver.close()

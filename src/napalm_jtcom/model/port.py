@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 
 @dataclass
@@ -59,12 +60,15 @@ class PortConfig:
             (e.g. ``"Auto"``, ``"1000M/Full"``), or ``None`` to leave unchanged.
         flow_control: ``True`` to enable flow control, ``False`` to disable,
             ``None`` to leave unchanged.
+        state: ``"present"`` to apply config to this port; ``"absent"`` to disable it
+            (set ``admin_up=False``).
     """
 
     port_id: int
     admin_up: bool | None = None
     speed_duplex: str | None = None
     flow_control: bool | None = None
+    state: Literal["present", "absent"] = "present"
 
 
 @dataclass

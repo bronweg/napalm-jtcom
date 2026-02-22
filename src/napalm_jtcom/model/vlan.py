@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 
 @dataclass
@@ -52,12 +53,14 @@ class VlanConfig:
         name: Human-readable VLAN name; ``None`` means "do not change".
         tagged_ports: 0-based port indices that carry this VLAN tagged (trunk).
         untagged_ports: 0-based port indices that carry this VLAN untagged (access).
+        state: ``"present"`` to create/update this VLAN; ``"absent"`` to delete it.
     """
 
     vlan_id: int
     name: str | None = None
     tagged_ports: list[int] = field(default_factory=list)
     untagged_ports: list[int] = field(default_factory=list)
+    state: Literal["present", "absent"] = "present"
 
 
 @dataclass
@@ -68,7 +71,7 @@ class VlanChangeSet:
         create: VLANs that exist in *desired* but not in *current*.
         update: VLANs present in both where name or membership differs.
         delete: VLAN IDs present in *current* but not in *desired*
-                (only populated when ``allow_delete=True``; VLAN 1 is never included).
+                VLAN 1 is never included.
     """
 
     create: list[VlanConfig] = field(default_factory=list)

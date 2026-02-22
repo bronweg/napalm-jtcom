@@ -2,12 +2,13 @@
 # Test playbook for jtcom_config module.
 #
 # Run (dry-run):
-#   ANSIBLE_LIBRARY=ansible/library ansible-playbook ansible/test_playbook.yml \
-#     -e jtcom_host=192.168.51.21 -e jtcom_user=admin -e jtcom_pass=admin --check
+#   cd ansible && OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES VIRTUAL_ENV=../.venv \
+#     ANSIBLE_CONFIG=ansible.cfg ../.venv/bin/ansible-playbook -i inventory.ini \
+#     test_playbook.yml -e jtcom_host=192.168.51.21 -e jtcom_user=admin \
+#     -e jtcom_pass=admin --check
 #
 # Run (live apply):
-#   ANSIBLE_LIBRARY=ansible/library ansible-playbook ansible/test_playbook.yml \
-#     -e jtcom_host=192.168.51.21 -e jtcom_user=admin -e jtcom_pass=admin
+#   (same without --check)
 
 - hosts: local
   connection: local
@@ -23,13 +24,11 @@
         username: "{{ jtcom_user }}"
         password: "{{ jtcom_pass }}"
         backup_before_change: true
-        allow_vlan_delete: false
-        allow_vlan_membership: true
-        allow_vlan_rename: true
         safety_port_id: 6
         vlans:
-          222:
-            name: test222
+          223:
+            name: Test_Ulis_VLAN
+            state: present
       register: result
 
     - name: Show result
