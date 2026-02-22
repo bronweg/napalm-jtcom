@@ -80,10 +80,9 @@ def build_device_plan(
 
     **Ports**:
 
-    - ``state="present"`` — compare each non-``None`` field; emit
-      ``port_update`` if any differs.
-    - ``state="absent"`` — disable the port (``admin_up=False``).
-    - In both cases: if ``safety_port_id`` matches, disabling is silently skipped.
+    - Compare each non-``None`` field; emit ``port_update`` if any differs.
+    - Set ``admin_up=False`` to administratively disable a port.
+    - If ``safety_port_id`` matches a disable (``admin_up=False``), the change is silently skipped.
 
     Args:
         current: Current device config (as read from the switch).
@@ -166,33 +165,26 @@ def build_device_plan(
 
         field_diffs: dict[str, Any] = {}
 
-        if cfg_p.state == "absent":
-            # "absent" on a port = administratively disable it
-            effective_admin_up: bool | None = False
-        else:
-            effective_admin_up = cfg_p.admin_up
-
-        if effective_admin_up is not None and effective_admin_up != cur_p.admin_up:
-            if not effective_admin_up and safety_port_id is not None and pid == safety_port_id:
+        if cfg_p.admin_up is not None and cfg_p.admin_up != cur_p.admin_up:
+            if not cfg_p.admin_up and safety_port_id is not None and pid == safety_port_id:
                 warnings.warn(
                     f"Refusing to disable safety port {pid}; skipping admin_up change.",
                     stacklevel=2,
                 )
             else:
-                field_diffs["admin_up"] = {"from": cur_p.admin_up, "to": effective_admin_up}
+                field_diffs["admin_up"] = {"from": cur_p.admin_up, "to": cfg_p.admin_up}
 
-        if cfg_p.state == "present":
-            if cfg_p.speed_duplex is not None and cfg_p.speed_duplex != cur_p.speed_duplex:
-                field_diffs["speed_duplex"] = {
-                    "from": cur_p.speed_duplex,
-                    "to": cfg_p.speed_duplex,
-                }
+        if cfg_p.speed_duplex is not None and cfg_p.speed_duplex != cur_p.speed_duplex:
+            field_diffs["speed_duplex"] = {
+                "from": cur_p.speed_duplex,
+                "to": cfg_p.speed_duplex,
+            }
 
-            if cfg_p.flow_control is not None and cfg_p.flow_control != cur_p.flow_control:
-                field_diffs["flow_control"] = {
-                    "from": cur_p.flow_control,
-                    "to": cfg_p.flow_control,
-                }
+        if cfg_p.flow_control is not None and cfg_p.flow_control != cur_p.flow_control:
+            field_diffs["flow_control"] = {
+                "from": cur_p.flow_control,
+                "to": cfg_p.flow_control,
+            }
 
         if field_diffs:
             port_changes.append(

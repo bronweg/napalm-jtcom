@@ -59,7 +59,6 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 admin_up=entry.get("admin_up"),
                 speed_duplex=entry.get("speed_duplex"),
                 flow_control=entry.get("flow_control"),
-                state=entry.get("state", "present"),
             )
 
         desired = DeviceConfig(vlans=vlans, ports=ports)

@@ -60,9 +60,8 @@ options:
     description: >
       Incremental port changes, keyed by 1-based port ID (string or int).
       Each entry may contain C(admin_up) (bool), C(speed_duplex) (str),
-      C(flow_control) (bool), and C(state) (C(present) or C(absent)).
-      C(state: absent) administratively disables the port.
-      Ports not listed are untouched.
+      and C(flow_control) (bool).  Set C(admin_up: false) to administratively
+      disable a port.  Ports not listed are untouched.
     type: dict
 notes:
   - Run this module on the Ansible controller (C(connection: local)).
@@ -109,7 +108,6 @@ EXAMPLES = r"""
         admin_up: true
         speed_duplex: Auto
         flow_control: false
-        state: present
 """
 
 RETURN = r"""

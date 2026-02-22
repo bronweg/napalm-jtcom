@@ -44,14 +44,12 @@ def _port(
     admin_up: bool | None = None,
     speed: str | None = None,
     flow: bool | None = None,
-    state: Literal["present", "absent"] = "present",
 ) -> PortConfig:
     return PortConfig(
         port_id=pid,
         admin_up=admin_up,
         speed_duplex=speed,
         flow_control=flow,
-        state=state,
     )
 
 
@@ -207,10 +205,10 @@ def test_port_unknown_to_current_skipped() -> None:
     assert plan.changes == []
 
 
-def test_port_state_absent_disables() -> None:
-    """state=absent on a port means administratively disable it (admin_up=False)."""
+def test_port_admin_up_false_disables() -> None:
+    """admin_up=False on a port entry produces a port_update to disable it."""
     cur = _cfg(ports={3: _port(3, admin_up=True, speed="Auto", flow=True)})
-    des = _cfg(ports={3: _port(3, state="absent")})
+    des = _cfg(ports={3: _port(3, admin_up=False)})
     plan = build_device_plan(cur, des)
     assert len(plan.changes) == 1
     ch = plan.changes[0]
@@ -232,10 +230,10 @@ def test_safety_port_prevents_disable(recwarn: pytest.WarningsChecker) -> None:
     assert "safety port" in str(recwarn[0].message)
 
 
-def test_safety_port_prevents_disable_via_absent(recwarn: pytest.WarningsChecker) -> None:
-    """state=absent on the safety port must also be blocked."""
+def test_safety_port_prevents_disable_via_admin_up_false(recwarn: pytest.WarningsChecker) -> None:
+    """admin_up=False on the safety port must be blocked with a warning."""
     cur = _cfg(ports={6: _port(6, admin_up=True, speed="Auto", flow=True)})
-    des = _cfg(ports={6: _port(6, state="absent")})
+    des = _cfg(ports={6: _port(6, admin_up=False)})
     plan = build_device_plan(cur, des, safety_port_id=6)
     assert plan.changes == []
     assert len(recwarn) == 1
