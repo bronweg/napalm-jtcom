@@ -49,3 +49,6 @@ site/
 .env
 .env.*
 !.env.example
+
+# Switch config backups (may contain credentials)
+backups/
