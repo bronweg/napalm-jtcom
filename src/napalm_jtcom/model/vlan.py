@@ -22,3 +22,22 @@ class VlanEntry:
     tagged_ports: list[str] = field(default_factory=list)
     untagged_ports: list[str] = field(default_factory=list)
     active: bool = True
+
+
+@dataclass
+class VlanPortConfig:
+    """Per-port VLAN configuration parsed from the port-based VLAN page.
+
+    Attributes:
+        port_name: Human-readable port name (e.g. "Port 1").
+        vlan_type: VLAN mode — "Access" or "Trunk".
+        access_vlan: Access VLAN ID (Access mode only; None if not set).
+        native_vlan: Native/untagged VLAN ID (Trunk mode only; None if not set).
+        permit_vlans: List of tagged VLAN IDs allowed on this trunk port.
+    """
+
+    port_name: str
+    vlan_type: str
+    access_vlan: int | None = None
+    native_vlan: int | None = None
+    permit_vlans: list[int] = field(default_factory=list)

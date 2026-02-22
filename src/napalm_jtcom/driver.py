@@ -11,7 +11,13 @@ from napalm_jtcom.client.errors import JTComError
 from napalm_jtcom.client.session import JTComCredentials, JTComSession
 from napalm_jtcom.parser.device import parse_device_info, parse_uptime_seconds
 from napalm_jtcom.parser.port import parse_port_page
-from napalm_jtcom.vendor.jtcom.endpoints import DEVICE_INFO, PORT_SETTINGS
+from napalm_jtcom.parser.vlan import parse_port_vlan_settings, parse_static_vlans
+from napalm_jtcom.vendor.jtcom.endpoints import (
+    DEVICE_INFO,
+    PORT_SETTINGS,
+    VLAN_PORT_BASED,
+    VLAN_STATIC,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +180,53 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         return result
 
     def get_vlans(self) -> dict[str, Any]:
-        """Return VLAN configuration."""
-        raise NotImplementedError("get_vlans() not yet implemented")
+        """Return VLAN information conforming to the NAPALM schema.
+
+        Fetches the static VLAN list from ``vlan.cgi?page=static`` and the
+        per-port VLAN settings from ``vlan.cgi?page=port_based``.  The two
+        results are combined to produce the NAPALM ``get_vlans()`` mapping.
+
+        Returns:
+            Dict keyed by integer VLAN ID, each value being::
+
+                {"name": str, "interfaces": [str, ...]}
+
+            ``interfaces`` is the sorted union of all ports that carry the
+            VLAN (tagged or untagged).
+
+        Raises:
+            JTComError: If the session is not open.
+            JTComParseError: If either VLAN page cannot be parsed.
+        """
+        session = self._require_session()
+        static_html = session.get(VLAN_STATIC, params={"page": "static"})
+        port_html = session.get(VLAN_PORT_BASED, params={"page": "port_based"})
+
+        vlans = parse_static_vlans(static_html)
+        port_configs = parse_port_vlan_settings(port_html)
+
+        vlan_map = {v.vlan_id: v for v in vlans}
+
+        for pc in port_configs:
+            if pc.vlan_type.lower() == "access" and pc.access_vlan is not None:
+                entry = vlan_map.get(pc.access_vlan)
+                if entry is not None:
+                    entry.untagged_ports.append(pc.port_name)
+            elif pc.vlan_type.lower() == "trunk":
+                if pc.native_vlan is not None:
+                    entry = vlan_map.get(pc.native_vlan)
+                    if entry is not None:
+                        entry.untagged_ports.append(pc.port_name)
+                for vid in pc.permit_vlans:
+                    entry = vlan_map.get(vid)
+                    if entry is not None:
+                        entry.tagged_ports.append(pc.port_name)
+
+        result: dict[str, Any] = {}
+        for vid, ve in sorted(vlan_map.items()):
+            all_ports = sorted(set(ve.tagged_ports + ve.untagged_ports))
+            result[str(vid)] = {"name": ve.name, "interfaces": all_ports}
+        return result
 
     def is_alive(self) -> dict[str, bool]:
         """Return liveness status of the HTTP session."""

@@ -1,9 +1,106 @@
-<!DOCTYPE html>
-<html>
-<head><title>Placeholder — vlan_port_based</title></head>
-<body>
-  <!-- Replace this file with a real HTML snapshot captured from a JTCom switch.
-       See tests/fixtures/README.md for instructions. -->
-  <p>Placeholder for vlan_port_based.html</p>
-</body>
-</html>
+<div>
+<h2 class="sub-title">VLAN Port Setting</h2>
+<form method="post" id="vlanMenber" name="vlanMenber" target="targetFrame" autocomplete="off">
+	<table border="1" class="sw-table stripe center">
+	  <thead>
+	  <tr>
+		<th>Port</th>
+		<th>VLAN Type</th>
+		<th>Access VLAN</th>
+		<th>Native VLAN</th>
+		<th>Permit VLAN</th>
+	  </tr>
+	  </thead>
+	  <tbody>
+	    <tr>
+		  <td class="mw">          <select name="PortId" id="PortId" multiple size="6">           <option value="0">Port 1
+          <option value="1">Port 2
+          <option value="2">Port 3
+          <option value="3">Port 4
+          <option value="4">Port 5
+          <option value="5">Port 6
+			</select>		  </td>
+		  <td align="center">
+		    <select name="VlanType" id="VlanType" onchange="checkEnable(this.value)">
+			  <option value="0">Access
+			  <option value="1">Trunk
+		    </select>
+		  </td>
+		  <td align="center">
+		    <select name="AccessVlan" id="AccessVlan">
+          <option value="1">VLAN 1
+          <option value="10">VLAN 10
+		  </select>
+		</td>
+		<td align="center">
+		  <select name="NativeVlan" id="NativeVlan" disabled>
+          <option value="1">VLAN 1
+          <option value="10">VLAN 10
+		  </select>
+		</td>
+		<td class="mw">        <select name="PermitVlan" id="PermitVlan" multiple size="6">       <option value="1">VLAN 1
+      <option value="10">VLAN 10
+		  </select>
+		</td>
+	  </tr>
+	  </tbody>
+	</table>
+	<br style="line-height:50%">
+  <div class="form-tool">
+	  <input id="apply" type="button" value="Apply" onclick="Apply()">
+  </div>
+</form>
+<br>
+<table class ="sw-table stripe center">
+  <tr>
+    <td >Port</td>
+    <td >VLAN Type</td>
+    <td >Access VLAN</td>
+    <td >Native VLAN</td>
+    <td >Permit VLAN</td>
+  </tr>
+  <tr>
+    <td>Port 1</td>
+<td>Access</td>
+<td>1</td>
+<td>--</td>
+<td>--</td>
+  </tr>
+  <tr>
+    <td>Port 2</td>
+<td>Access</td>
+<td>1</td>
+<td>--</td>
+<td>--</td>
+  </tr>
+  <tr>
+    <td>Port 3</td>
+<td>Access</td>
+<td>1</td>
+<td>--</td>
+<td>--</td>
+  </tr>
+  <tr>
+    <td>Port 4</td>
+<td>Access</td>
+<td>1</td>
+<td>--</td>
+<td>--</td>
+  </tr>
+  <tr>
+    <td>Port 5</td>
+<td>Access</td>
+<td>1</td>
+<td>--</td>
+<td>--</td>
+  </tr>
+  <tr>
+    <td>Port 6</td>
+<td>Access</td>
+<td>1</td>
+<td>--</td>
+<td>--</td>
+  </tr>
+</table>
+<br>
+	<script>		checkEnable(getInVal('VlanType'));		function Apply(){			var _PortId = getInVal('PortId');			var _VlanType = getInVal('VlanType');			var _PermitVlan = getInVal('PermitVlan');			if(_PortId == ''){				alert("Please select port");				return;			}			if((_VlanType == 0)&&(_PermitVlan != '')){				alert("Do not select permit VLAN when setting access mode!");				return;			}          showBg();          httpPostGet("POST","vlanport.cgi",serializeForm("vlanMenber"),function(val){				if(0==val.code)reCurrentWeb();else {closeBg();				  if (1==val.code){alert("Parameter error!");}				  else {alert("Set failed! " + val.data);}}				},1);		}		function checkEnable(val){			if(val==1){				enAndDisId("NativeVlan",false);				enAndDisId("AccessVlan",true);				window.ge.PermitVlan._disabled(0);			}else{				enAndDisId("NativeVlan",true);				enAndDisId("AccessVlan",false);				window.ge.PermitVlan._disabled();			}		}</script>
