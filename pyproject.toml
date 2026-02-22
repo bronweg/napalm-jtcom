@@ -36,6 +36,7 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.5",
     "types-requests",
+    "responses>=0.25",
 ]
 
 [project.urls]
@@ -52,7 +53,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
-ignore = ["ANN101", "ANN102"]
+ignore = []
 
 [tool.mypy]
 python_version = "3.11"

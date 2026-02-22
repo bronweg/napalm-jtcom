@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -22,6 +21,6 @@ class PortEntry:
     port_id: str
     description: str = ""
     admin_enabled: bool = True
-    speed: Optional[int] = None
+    speed: int | None = None
     duplex: str = "auto"
     link_up: bool = False

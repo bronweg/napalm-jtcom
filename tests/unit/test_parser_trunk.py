@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from napalm_jtcom.parser.trunk import parse_trunk_groups, parse_lacp_status
+from napalm_jtcom.parser.trunk import parse_lacp_status, parse_trunk_groups
 
 
 def test_parse_trunk_groups_not_implemented() -> None:

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from napalm.base.base import NetworkDriver
 
 logger = logging.getLogger(__name__)
 
 
-class JTComDriver(NetworkDriver):
+class JTComDriver(NetworkDriver):  # type: ignore[misc]
     """NAPALM driver for JTCom CGI-based Ethernet switches.
 
     Communicates with the switch via its HTTP CGI web interface.
@@ -33,7 +33,7 @@ class JTComDriver(NetworkDriver):
         username: str,
         password: str,
         timeout: int = 60,
-        optional_args: Optional[dict[str, Any]] = None,
+        optional_args: dict[str, Any] | None = None,
     ) -> None:
         self.hostname = hostname
         self.username = username

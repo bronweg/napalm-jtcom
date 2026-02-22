@@ -6,7 +6,7 @@ import pathlib
 
 import pytest
 
-from napalm_jtcom.parser.vlan import parse_static_vlans, parse_port_based_vlans
+from napalm_jtcom.parser.vlan import parse_port_based_vlans, parse_static_vlans
 
 FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 
