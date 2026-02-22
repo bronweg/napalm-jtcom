@@ -19,6 +19,7 @@ def plan_vlan_changes(
     allow_delete: bool = False,
     allow_membership: bool = False,
     allow_rename: bool = True,
+    _warn_stacklevel: int = 2,
 ) -> VlanChangeSet:
     """Compute the minimal set of changes needed to reach *desired* from *current*.
 
@@ -87,7 +88,7 @@ def plan_vlan_changes(
             warnings.warn(
                 f"VLANs {extra_vids} exist on switch but are not in desired state; "
                 "pass allow_delete=True to remove them.",
-                stacklevel=2,
+                stacklevel=_warn_stacklevel,
             )
 
     return VlanChangeSet(create=creates, update=updates, delete=deletes)

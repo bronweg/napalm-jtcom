@@ -148,7 +148,7 @@ class JTComSession:
     def post(
         self,
         path: str,
-        data: dict[str, str] | None = None,
+        data: dict[str, str] | list[tuple[str, str]] | None = None,
     ) -> dict[str, object]:
         """Perform an authenticated POST and return the parsed JSON payload.
 
@@ -157,7 +157,9 @@ class JTComSession:
 
         Args:
             path: CGI path relative to the switch base URL.
-            data: Additional form fields (merged after injection).
+            data: Additional form fields.  Either a ``dict`` for simple payloads
+                or a ``list[tuple[str, str]]`` when repeated keys are needed
+                (e.g. multiple ``del=`` fields for bulk VLAN deletion).
 
         Returns:
             Parsed JSON response as ``{"code": int, "data": str, ...}``.
@@ -226,12 +228,18 @@ class JTComSession:
     def _do_post(
         self,
         path: str,
-        data: dict[str, str] | None,
+        data: dict[str, str] | list[tuple[str, str]] | None,
     ) -> dict[str, object]:
         """Send one POST (with page injection) and parse JSON."""
-        form: dict[str, str] = {"page": _PAGE_PARAM}
-        if data:
-            form.update(data)
+        form: dict[str, str] | list[tuple[str, str]]
+        if isinstance(data, list):
+            # Preserve repeated keys (e.g. del=10&del=20); inject page at front.
+            form = [("page", _PAGE_PARAM), *data]
+        else:
+            form_dict: dict[str, str] = {"page": _PAGE_PARAM}
+            if data:
+                form_dict.update(data)
+            form = form_dict
         resp = self._http.post_form(path, data=form)
         return self._parse_json(resp.text, path)
 

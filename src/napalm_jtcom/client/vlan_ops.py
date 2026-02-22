@@ -27,9 +27,6 @@ from __future__ import annotations
 
 import logging
 
-import requests
-
-from napalm_jtcom.client.errors import JTComSwitchError
 from napalm_jtcom.client.session import JTComSession
 from napalm_jtcom.vendor.jtcom.endpoints import VLAN_CREATE_DELETE, VLAN_PORT_SET
 
@@ -91,13 +88,11 @@ def vlan_delete(
     logger.debug("Deleting VLANs %s", safe_ids)
 
     # requests.Session.post() with data= only sends one value per key when
-    # data is a dict.  We need to repeat the key, so we pass a list of tuples.
+    # data is a dict.  Pass a list of tuples so repeated del= keys are preserved.
+    # session.post() injects page=inside and handles code=11 auth-expiry retry.
     form_fields: list[tuple[str, str]] = [("del", str(v)) for v in sorted(safe_ids)]
     form_fields.append(("cmd", "del"))
-    form_fields.append(("page", "inside"))
-
-    resp = session._http.post_form(VLAN_CREATE_DELETE, data=form_fields)
-    _check_response(resp, VLAN_CREATE_DELETE, form_fields)
+    session.post(VLAN_CREATE_DELETE, data=form_fields)
 
 
 def vlan_set_port(
@@ -159,29 +154,3 @@ def vlan_set_port(
         },
     )
 
-
-def _check_response(
-    resp: requests.Response,
-    endpoint: str,
-    payload: list[tuple[str, str]],
-) -> None:
-    """Parse JSON and raise :exc:`JTComSwitchError` on non-zero code."""
-    import json
-
-    try:
-        result: dict[str, object] = json.loads(resp.text)
-    except (json.JSONDecodeError, ValueError) as exc:
-        from napalm_jtcom.client.errors import JTComParseError
-
-        raise JTComParseError(
-            f"Non-JSON response from {endpoint!r}: {resp.text[:200]!r}"
-        ) from exc
-
-    code = result.get("code", -1)
-    if code != 0:
-        raise JTComSwitchError(
-            code=int(str(code)),
-            message=str(result.get("data", "")),
-            endpoint=endpoint,
-            payload=dict(payload),
-        )
