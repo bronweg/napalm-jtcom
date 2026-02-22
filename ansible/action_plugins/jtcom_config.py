@@ -13,7 +13,7 @@ from typing import Any
 from ansible.plugins.action import ActionBase
 
 
-class ActionModule(ActionBase):
+class ActionModule(ActionBase):  # type: ignore[misc]
     """Idempotent configuration of JTCom CGI switches via napalm_jtcom."""
 
     TRANSFERS_FILES = False

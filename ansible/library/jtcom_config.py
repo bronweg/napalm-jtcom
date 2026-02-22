@@ -141,7 +141,7 @@ applied:
   returned: always
 """
 
-from ansible.module_utils.basic import AnsibleModule  # noqa: E402
+from ansible.module_utils.basic import AnsibleModule  # noqa: E402  # type: ignore[import-untyped]
 
 
 def main() -> None:
