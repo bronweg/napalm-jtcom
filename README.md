@@ -53,6 +53,66 @@ with driver("192.168.1.1", "admin", "admin") as device:
 
 ---
 
+## Key Features
+
+| Capability | Method / Command |
+|---|---|
+| Read device facts | `get_facts()` |
+| Read interfaces | `get_interfaces()` |
+| Read VLANs | `get_vlans()` |
+| Incremental VLAN changes | `set_vlans(desired, dry_run=False)` |
+| Full device config apply | `apply_device_config(desired, check_mode=False)` |
+| Ansible integration | `ansible/action_plugins/jtcom_config` |
+
+### Incremental Change Model
+
+`set_vlans()` and `apply_device_config()` use an **incremental model**: only
+the VLANs and ports you list are affected. Unlisted items are always a no-op.
+
+Each entry carries a `state` field:
+
+```python
+from napalm_jtcom.driver import JTComDriver
+from napalm_jtcom.model.config import DeviceConfig
+from napalm_jtcom.model.vlan import VlanConfig
+
+driver = JTComDriver("192.168.1.1", "admin", "admin")
+driver.open()
+
+result = driver.apply_device_config(
+    DeviceConfig(
+        vlans={
+            100: VlanConfig(vlan_id=100, name="servers", state="present"),
+            # 200: VlanConfig(vlan_id=200, state="absent"),  # delete VLAN 200
+        },
+        ports={},  # no port changes
+    ),
+    check_mode=True,  # dry-run — pass False to apply
+)
+driver.close()
+```
+
+### Ansible Module
+
+The `ansible/` directory contains a native action plugin that calls
+`apply_device_config()` without any subprocess.
+
+```yaml
+- name: Configure switch VLANs
+  jtcom_config:
+    host: "{{ jtcom_host }}"
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
+    vlans:
+      - vlan_id: 100
+        name: servers
+        state: present
+      - vlan_id: 200
+        state: absent
+```
+
+---
+
 ## Development
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, testing, and contribution guidelines.
@@ -62,7 +122,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, testing, and contribut
 pytest
 
 # Lint + type-check
-ruff check src/
+ruff check src/ tests/ ansible/
 mypy src/
 ```
 

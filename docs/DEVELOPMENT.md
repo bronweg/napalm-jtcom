@@ -62,12 +62,19 @@ mypy src/
 napalm-jtcom/
   src/napalm_jtcom/
     driver.py          # NAPALM NetworkDriver subclass
-    client/            # HTTP session and request helpers
+    client/            # HTTP session, request helpers, VLAN/port write ops
     parser/            # HTML → Python object parsers
-    model/             # Typed dataclass models
+    model/             # Typed dataclass models (VlanConfig, PortConfig, DeviceConfig …)
+    utils/             # Diff/plan engines (vlan_diff, device_diff, port_diff, render)
     vendor/jtcom/      # JTCom-specific endpoint paths and field mappings
+  ansible/
+    action_plugins/    # jtcom_config action plugin (imports napalm_jtcom directly)
+    library/           # jtcom_config module stub (docs / argument_spec for ansible-doc)
+    inventory.ini      # Example inventory
+    ansible.cfg        # Ansible configuration
+    test_playbook.yml  # Example playbook
   tests/
-    unit/              # Parser and session unit tests
+    unit/              # Unit tests for parsers, diff engines, and payloads
     fixtures/          # HTML snapshots from real devices
   examples/            # Runnable usage examples
   docs/                # Developer documentation
@@ -82,7 +89,30 @@ napalm-jtcom/
 5. Implement the getter in `driver.py` calling the session + parser.
 6. Write tests in `tests/unit/`.
 
+## Running the Ansible Module
+
+The `ansible/` directory contains a native Ansible action plugin that wraps
+`apply_device_config()` directly (no subprocess).
+
+```bash
+cd ansible
+
+# Dry-run (--check) against the real switch:
+OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES \
+VIRTUAL_ENV=/path/to/.venv \
+ANSIBLE_CONFIG=ansible.cfg \
+/path/to/.venv/bin/ansible-playbook \
+  -i inventory.ini test_playbook.yml \
+  -e jtcom_host=192.168.51.21 -e jtcom_user=admin -e jtcom_pass=admin \
+  --check
+```
+
+The `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` flag is required on macOS to
+prevent a fork-safety crash when Ansible forks a subprocess.
+
 ## Releasing
+
+
 
 ```bash
 pip install build

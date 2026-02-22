@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
-"""Example: apply a declarative VLAN configuration to a JTCom switch.
+"""Example: apply an incremental VLAN change to a JTCom switch.
+
+Only the VLANs listed in ``DESIRED_VLANS`` are affected; all other VLANs on
+the switch are left completely untouched.  Each entry must carry a ``state``
+field:
+
+    state="present"  — create the VLAN if it doesn't exist, or update its
+                       name/membership if it does.
+    state="absent"   — delete the VLAN if it exists (VLAN 1 is never deleted).
+
+Usage (dry run, default):
+
+    JTCOM_HOST=192.168.51.21 python examples/apply_vlan.py
+
+Usage (live apply):
+
+    APPLY=1 JTCOM_HOST=192.168.51.21 python examples/apply_vlan.py
 
 Environment variables:
-    JTCOM_HOST       Switch base URL, e.g. http://192.168.51.21
-    JTCOM_USERNAME   Login username (default: admin)
-    JTCOM_PASSWORD   Login password (default: admin)
-    JTCOM_VERIFY_TLS Verify TLS certificates, "true" / "false" (default: false)
-    APPLY            Set to "1" to actually apply changes; omit for dry-run only
-
-Usage (dry run first, then apply):
-
-    JTCOM_HOST=http://192.168.51.21 python examples/apply_vlan.py
-    APPLY=1 JTCOM_HOST=http://192.168.51.21 python examples/apply_vlan.py
+    JTCOM_HOST        Switch IP or hostname (required).
+    JTCOM_USERNAME    Login username (default: admin).
+    JTCOM_PASSWORD    Login password (default: admin).
+    JTCOM_VERIFY_TLS  Set to "true" to verify TLS certificates (default: false).
+    APPLY             Set to "1" to actually apply changes (default: dry-run).
 """
 
 from __future__ import annotations
@@ -19,30 +30,32 @@ from __future__ import annotations
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 from napalm_jtcom.driver import JTComDriver
 from napalm_jtcom.model.vlan import VlanConfig
 
 # ---------------------------------------------------------------------------
-# Desired VLAN state -- edit this to suit your test
+# Incremental VLAN change set — only these VLANs will be touched.
 # ---------------------------------------------------------------------------
 DESIRED_VLANS: dict[int, VlanConfig] = {
-    1: VlanConfig(vlan_id=1),            # keep VLAN 1 unchanged
-    222: VlanConfig(vlan_id=222, name="test222"),  # create / ensure this VLAN
+    222: VlanConfig(vlan_id=222, name="test222", state="present"),  # create / update
+    # 10: VlanConfig(vlan_id=10, state="absent"),  # uncomment to delete VLAN 10
 }
 
 # ---------------------------------------------------------------------------
 # Read configuration from environment
 # ---------------------------------------------------------------------------
-host = os.environ.get("JTCOM_HOST", "http://192.168.51.21")
+host = os.environ.get("JTCOM_HOST", "")
+if not host:
+    print("ERROR: JTCOM_HOST environment variable is required.", file=sys.stderr)
+    sys.exit(1)
+
 username = os.environ.get("JTCOM_USERNAME", "admin")
 password = os.environ.get("JTCOM_PASSWORD", "admin")
 verify_tls = os.environ.get("JTCOM_VERIFY_TLS", "false").lower() == "true"
-apply_changes = os.environ.get("APPLY", "") == "1"
+apply_changes = os.environ.get("APPLY", "0") == "1"
 
 # ---------------------------------------------------------------------------
-# Driver setup
+# Driver setup and apply
 # ---------------------------------------------------------------------------
 print(f"Target switch : {host}")
 print(f"Apply changes : {apply_changes}")
@@ -61,8 +74,9 @@ driver = JTComDriver(
 
 try:
     driver.open()
+
     print("=== DRY RUN ===")
-    plan = driver.set_vlans(DESIRED_VLANS, dry_run=True, allow_delete=False)
+    plan = driver.set_vlans(DESIRED_VLANS, dry_run=True)
     print(f"  Create : {plan['create']}")
     print(f"  Update : {plan['update']}")
     print(f"  Delete : {plan['delete']}")
@@ -73,7 +87,7 @@ try:
         sys.exit(0)
 
     print("=== APPLYING ===")
-    result = driver.set_vlans(DESIRED_VLANS, dry_run=False, allow_delete=False)
+    result = driver.set_vlans(DESIRED_VLANS, dry_run=False)
     print(f"  Backup : {result['backup_file'] or '(none)'}")
     print(f"  Created: {result['create']}")
     print(f"  Updated: {result['update']}")
