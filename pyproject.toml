@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "napalm-jtcom"
+version = "0.1.0"
+description = "NAPALM community driver for JTCom CGI-based Ethernet switches"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Ulis Ilya", email = "ulis.ilya@gmail.com" }]
+keywords = ["napalm", "network", "automation", "jtcom", "switch", "cgi"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Networking",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "napalm",
+    "requests",
+    "beautifulsoup4",
+    "lxml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    "types-requests",
+]
+
+[project.urls]
+Homepage = "https://github.com/bronweg/napalm-jtcom"
+Repository = "https://github.com/bronweg/napalm-jtcom"
+"Bug Tracker" = "https://github.com/bronweg/napalm-jtcom/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/napalm_jtcom"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
+ignore = ["ANN101", "ANN102"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["napalm.*", "bs4.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=napalm_jtcom --cov-report=term-missing --cov-report=html"
