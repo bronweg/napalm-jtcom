@@ -1,0 +1,37 @@
+---
+# Test playbook for jtcom_config module.
+#
+# Run (dry-run):
+#   ANSIBLE_LIBRARY=ansible/library ansible-playbook ansible/test_playbook.yml \
+#     -e jtcom_host=192.168.51.21 -e jtcom_user=admin -e jtcom_pass=admin --check
+#
+# Run (live apply):
+#   ANSIBLE_LIBRARY=ansible/library ansible-playbook ansible/test_playbook.yml \
+#     -e jtcom_host=192.168.51.21 -e jtcom_user=admin -e jtcom_pass=admin
+
+- hosts: local
+  connection: local
+  gather_facts: false
+  vars:
+    # Use the project venv so napalm-jtcom is importable by the module.
+    ansible_python_interpreter: "{{ lookup('env', 'VIRTUAL_ENV') | default('/Users/ilya.ulis/ulis.family/napalm-jtcom/.venv', true) }}/bin/python3"
+
+  tasks:
+    - name: Configure JTCom switch VLANs
+      jtcom_config:
+        host: "{{ jtcom_host }}"
+        username: "{{ jtcom_user }}"
+        password: "{{ jtcom_pass }}"
+        backup_before_change: true
+        allow_vlan_delete: false
+        allow_vlan_membership: true
+        allow_vlan_rename: true
+        safety_port_id: 6
+        vlans:
+          222:
+            name: test222
+      register: result
+
+    - name: Show result
+      ansible.builtin.debug:
+        var: result
