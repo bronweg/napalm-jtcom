@@ -10,7 +10,8 @@ from napalm.base.base import NetworkDriver
 from napalm_jtcom.client.errors import JTComError
 from napalm_jtcom.client.session import JTComCredentials, JTComSession
 from napalm_jtcom.parser.device import parse_device_info, parse_uptime_seconds
-from napalm_jtcom.vendor.jtcom.endpoints import DEVICE_INFO
+from napalm_jtcom.parser.port import parse_port_page
+from napalm_jtcom.vendor.jtcom.endpoints import DEVICE_INFO, PORT_SETTINGS
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +133,45 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         }
 
     def get_interfaces(self) -> dict[str, Any]:
-        """Return interface information."""
-        raise NotImplementedError("get_interfaces() not yet implemented")
+        """Return interface information conforming to the NAPALM schema.
+
+        Fetches port settings and status from ``port.cgi`` and returns
+        a mapping from interface name (e.g. ``"Port 1"``) to a dict with
+        keys: ``is_up``, ``is_enabled``, ``description``, ``last_flapped``,
+        ``speed``, ``mtu``, ``mac_address``.
+
+        Returns:
+            Dict keyed by interface name.
+
+        Raises:
+            JTComError: If the session is not open.
+            JTComParseError: If the port page cannot be parsed.
+        """
+        session = self._require_session()
+        html = session.get(PORT_SETTINGS)
+        settings_list, oper_list = parse_port_page(html)
+        oper_by_id = {op.port_id: op for op in oper_list}
+
+        result: dict[str, Any] = {}
+        for settings in settings_list:
+            oper = oper_by_id.get(settings.port_id)
+            link_up: bool = bool(oper.link_up) if oper is not None else False
+            speed: float = (
+                float(oper.negotiated_speed_mbps)
+                if oper is not None and oper.negotiated_speed_mbps is not None
+                else 0.0
+            )
+            result[settings.name] = {
+                "is_up": link_up,
+                "is_enabled": settings.admin_up,
+                "description": "",
+                "last_flapped": -1.0,
+                "speed": speed,
+                "mtu": 0,
+                "mac_address": "",
+            }
+
+        return result
 
     def get_vlans(self) -> dict[str, Any]:
         """Return VLAN configuration."""

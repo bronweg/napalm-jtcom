@@ -1,0 +1,62 @@
+<div>	<h2 class="sub-title">Port Statistics</h2>	<form method="post" name="statusDel" id="statusDel" target="targetFrame" autocomplete="off">	  <table class="sw-table stripe center">		<thead>		  <tr>          <th>Port</th>
+          <th>State</th>
+          <th>Link Status</th>
+          <th>TxGoodPkt</th>
+          <th>TxBadPkt</th>
+          <th>RxGoodPkt</th>
+          <th>RxBadPkt</th>
+		  </tr>	    </thead>	    <tbody>    <tr>
+      <td align="center">Port 1</td>
+      <td align="center">Enable</td>
+      <td align="center">Link Down</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+    </tr>
+    <tr>
+      <td align="center">Port 2</td>
+      <td align="center">Enable</td>
+      <td align="center">Link Down</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+    </tr>
+    <tr>
+      <td align="center">Port 3</td>
+      <td align="center">Enable</td>
+      <td align="center">Link Down</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+    </tr>
+    <tr>
+      <td align="center">Port 4</td>
+      <td align="center">Enable</td>
+      <td align="center">Link Down</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+    </tr>
+    <tr>
+      <td align="center">Port 5</td>
+      <td align="center">Enable</td>
+      <td align="center">Link Down</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+      <td align="center">0</td>
+    </tr>
+    <tr>
+      <td align="center">Port 6</td>
+      <td align="center">Enable</td>
+      <td align="center">Link Up</td>
+      <td align="center">28531</td>
+      <td align="center">0</td>
+      <td align="center">302853</td>
+      <td align="center">0</td>
+    </tr>
+	    </tbody>	  </table>    <div class="form-tool">		<input type="button" value="Clear" class="btntwo" onclick="ClearApply()">	  </div>	  <script type="text/javascript">		function ClearApply(){		  showBg();		  httpPostGet("POST","portstatistics.cgi",serializeForm("statusDel"),function(val){				if(0==val.code)reCurrentWeb();else {closeBg();alert("Set failed! ");}				},1);		}	  </script>	</form></div>

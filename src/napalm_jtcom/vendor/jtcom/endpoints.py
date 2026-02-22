@@ -15,6 +15,7 @@ DEVICE_INFO: str = "/info.cgi"
 
 # Port management
 PORT_SETTINGS: str = "/port.cgi"
+PORT_STATS: str = "/port.cgi"  # use ?page=stats query param
 
 # VLAN management
 VLAN_STATIC: str = "/vlan.cgi"

@@ -1,9 +1,159 @@
-<!DOCTYPE html>
-<html>
-<head><title>Placeholder — port_settings</title></head>
-<body>
-  <!-- Replace this file with a real HTML snapshot captured from a JTCom switch.
-       See tests/fixtures/README.md for instructions. -->
-  <p>Placeholder for port_settings.html</p>
-</body>
-</html>
+<div class="sys-info">
+<h2 class="sub-title">Port Setting</h2>
+<form method="post" id="PostFrom" name="PostFrom" targetFrame="targetFrame" autocomplete="off">  <table class="sw-table stripe center">    <thead>    <tr>
+      <th>Port</th>
+      <th>Admin Status</th>
+      <th>Speed/Duplex</th>
+      <th>Flow Control</th>
+    </tr>
+    </thead>    <tbody    <tr>
+      <td>
+        <select name="portid" id="portid" multiple size="4" >
+          <option value="0">Port 1</option>
+          <option value="1">Port 2</option>
+          <option value="2">Port 3</option>
+          <option value="3">Port 4</option>
+        </select>
+      </td>
+      <td>
+        <select name="state" id="state">
+          <option value="1">Enable</option>
+          <option value="0">Disable</option>
+        </select>
+      </td>
+      <td>
+        <select name="speed_duplex" id="speed_duplex">
+          <option value="0">Auto</option>
+          <option value="1">10M/Half</option>
+          <option value="2">10M/Full</option>
+          <option value="3">100M/Half</option>
+          <option value="4">100M/Full</option>
+          <option value="5">1000M/Full</option>
+          <option value="6">2500M/Full</option>
+        </select>
+      </td>
+      <td>
+        <select name="flow" id="flow">
+          <option value="0">Off</option>
+          <option value="1">On</option>
+        </select>
+      </td>
+    </tr>
+    </tbody>  </table>
+  <br style="line-height:50%">
+  <div class="form-tool">    <input type="button" value="Apply" onclick="apply_setting1()">  </div></form>
+<form method="post" id="PostOpticalLogoutFrom" name="PostOpticalLogoutFrom" targetFrame="targetFrame" autocomplete="off">  <table class="sw-table stripe center">    <thead>    <tr>
+      <th>Port</th>
+      <th>Admin Status</th>
+      <th>Speed/Duplex</th>
+      <th>Flow Control</th>
+    </tr>
+    </thead>    <tbody>    <tr>
+      <td>
+        <select name="portid" id="portid" multiple size="2" >
+          <option value="4">Port 5</option>
+          <option value="5">Port 6</option>
+        </select>
+      </td>
+      <td>
+        <select name="state" id="state">
+          <option value="1">Enable</option>
+          <option value="0">Disable</option>
+        </select>
+      </td>
+      <td>
+        <select name="speed_duplex" id="speed_duplex">
+          <option value="4">100M/Full</option>
+          <option value="5">1000M/Full</option>
+          <option value="6">2500M/Full</option>
+          <option value="7">10G/Full</option>
+        </select>
+      </td>
+      <td>
+        <select name="flow" id="flow">
+          <option value="0">Off</option>
+          <option value="1">On</option>
+        </select>
+      </td>
+    </tr>
+    </tbody>  </table>
+  <br style="line-height:50%">
+  <div class="form-tool">    <input type="button" value="Apply" onclick="apply_setting2()">  </div></form>
+  <table class="sw-table stripe center">  <thead>
+  <tr>
+    <th rowspan="2">Port</th>
+    <th rowspan="2">Admin Status</th>
+    <th colspan="2">Speed/Duplex</th>
+    <th colspan="2">Flow Control</th>
+  </tr>
+  <tr>
+    <th>Config</th>
+    <th>Actual</th>
+    <th>Config</th>
+    <th>Actual</th>
+  </tr>
+  </thead>
+  <tbody>
+  <tr>
+    <td>Port 1</td>
+    <td>Enable    </td>
+    <td>Auto    </td>
+    <td>Link Down    </td>
+    <td>On    </td>
+    <td>Off</td>
+  </tr>
+  <tr>
+    <td>Port 2</td>
+    <td>Enable    </td>
+    <td>Auto    </td>
+    <td>Link Down    </td>
+    <td>On    </td>
+    <td>Off</td>
+  </tr>
+  <tr>
+    <td>Port 3</td>
+    <td>Enable    </td>
+    <td>Auto    </td>
+    <td>Link Down    </td>
+    <td>On    </td>
+    <td>Off</td>
+  </tr>
+  <tr>
+    <td>Port 4</td>
+    <td>Enable    </td>
+    <td>Auto    </td>
+    <td>Link Down    </td>
+    <td>On    </td>
+    <td>Off</td>
+  </tr>
+  <tr>
+    <td>Port 5</td>
+    <td>Enable    </td>
+    <td>10G/Full    </td>
+    <td>Link Down    </td>
+    <td>On    </td>
+    <td>Off</td>
+  </tr>
+  <tr>
+    <td>Port 6</td>
+    <td>Enable    </td>
+    <td>10G/Full    </td>
+    <td>10G/Full    </td>
+    <td>On    </td>
+    <td>On</td>
+  </tr>
+  </tbody>
+</table>
+<script>
+  function apply_setting1(){      var _portid = document.forms['PostFrom']['portid'].value;
+      if (_portid == ""){
+        alert('Please select port');
+        return false;
+      }
+    showBg();      httpPostGet("POST", "port.cgi", serializeForm("PostFrom"), function(val){        if(0==val.code){reCurrentWeb();}else {closeBg();          if (1==val.code){alert("Parameter error!");}          else {alert("Set failed! " + val.data);}}      },1);  }  function apply_setting2(){      var _portid = document.forms['PostOpticalLogoutFrom']['portid'].value;
+      if (_portid == ""){
+        alert('Please select port');
+        return false;
+      }
+    showBg();      httpPostGet("POST", "port.cgi", serializeForm("PostOpticalLogoutFrom"), function(val){        if(0==val.code){reCurrentWeb();}else {closeBg();          if (1==val.code){alert("Parameter error!");}          else {alert("Set failed! " + val.data);}}    },1);  }</script>
+</div>
