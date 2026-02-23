@@ -44,13 +44,13 @@ pytest tests/unit/test_parser_vlan.py -v
 
 ```bash
 # Lint
-ruff check src/ tests/
+ruff check src/ tests/ ansible/ galaxy/ examples/
 
 # Auto-fix lint issues
-ruff check --fix src/ tests/
+ruff check --fix src/ tests/ ansible/ galaxy/ examples/
 
 # Format
-ruff format src/ tests/
+ruff format src/ tests/ ansible/ galaxy/ examples/
 
 # Type check
 mypy src/
@@ -73,6 +73,12 @@ napalm-jtcom/
     inventory.ini      # Example inventory
     ansible.cfg        # Ansible configuration
     test_playbook.yml  # Example playbook
+  galaxy/
+    bronweg/cgiswitch/ # Ansible Galaxy collection (bronweg.cgiswitch, v0.1.0)
+      galaxy.yml       # Collection manifest
+      plugins/action/  # Action plugin
+      plugins/modules/ # Module stub (ansible-doc / Galaxy)
+      examples/        # Ready-to-run playbooks
   tests/
     unit/              # Unit tests for parsers, diff engines, and payloads
     fixtures/          # HTML snapshots from real devices
