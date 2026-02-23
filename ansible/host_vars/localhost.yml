@@ -1,2 +1,2 @@
 ---
-ansible_python_interpreter: /Users/ilya.ulis/ulis.family/napalm-jtcom/.venv/bin/python3
+ansible_python_interpreter: "{{ lookup('env', 'VIRTUAL_ENV') }}/bin/python3"

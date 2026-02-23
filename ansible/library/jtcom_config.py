@@ -76,9 +76,9 @@ author:
 EXAMPLES = r"""
 - name: Configure VLANs on JTCom switch (check mode)
   jtcom_config:
-    host: 192.168.51.21
-    username: admin
-    password: admin
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
     vlans:
       10:
         name: Management
@@ -89,9 +89,9 @@ EXAMPLES = r"""
 
 - name: Apply VLAN and port config (incremental)
   jtcom_config:
-    host: 192.168.51.21
-    username: admin
-    password: admin
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
     vlans:
       10:
         name: Management

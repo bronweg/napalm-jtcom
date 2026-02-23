@@ -4,7 +4,7 @@
 Usage::
 
     # Dry-run (no changes) — shows the planned toggle:
-    export JTCOM_HOST=192.168.51.21
+    export JTCOM_HOST=192.0.2.1
     export TEST_PORT_ID=1        # required: 1-based port number to test
     python examples/toggle_port_admin.py
 

@@ -62,15 +62,15 @@ notes:
 requirements:
   - napalm-jtcom >= 0.8.0
 author:
-  - Ulis Ilya <ulis.ilya@gmail.com>
+  - napalm-jtcom contributors
 """
 
 EXAMPLES = r"""
 - name: Ensure VLAN 10 exists (check mode)
   bronweg.cgiswitch.jtcom_config:
-    host: 192.168.51.21
-    username: admin
-    password: admin
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
     verify_tls: false
     vlans:
       10:
@@ -79,9 +79,9 @@ EXAMPLES = r"""
 
 - name: Apply VLAN and port config (incremental)
   bronweg.cgiswitch.jtcom_config:
-    host: 192.168.51.21
-    username: admin
-    password: admin
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
     verify_tls: false
     vlans:
       10:

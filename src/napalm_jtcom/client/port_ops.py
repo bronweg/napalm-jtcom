@@ -4,7 +4,7 @@ Each function translates a strongly-typed request into the exact form-field
 payload captured from the real switch and delegates to
 :class:`~napalm_jtcom.client.session.JTComSession` for dispatch.
 
-Confirmed payloads (real switch 192.168.51.21):
+Confirmed payloads (real switch <switch-ip>):
 
     DISABLE PORT 1: POST /port.cgi
         portid=0&state=0&speed_duplex=0&flow=1&page=inside

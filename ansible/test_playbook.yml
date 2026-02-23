@@ -4,7 +4,7 @@
 # Run (dry-run):
 #   cd ansible && OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES VIRTUAL_ENV=../.venv \
 #     ANSIBLE_CONFIG=ansible.cfg ../.venv/bin/ansible-playbook -i inventory.ini \
-#     test_playbook.yml -e jtcom_host=192.168.51.21 -e jtcom_user=admin \
+#     test_playbook.yml -e jtcom_host=192.0.2.1 -e jtcom_user=admin \
 #     -e jtcom_pass=admin --check
 #
 # Run (live apply):
@@ -15,7 +15,7 @@
   gather_facts: false
   vars:
     # Use the project venv so napalm-jtcom is importable by the module.
-    ansible_python_interpreter: "{{ lookup('env', 'VIRTUAL_ENV') | default('/Users/ilya.ulis/ulis.family/napalm-jtcom/.venv', true) }}/bin/python3"
+    ansible_python_interpreter: "{{ lookup('env', 'VIRTUAL_ENV') }}/bin/python3"
 
   tasks:
     - name: Configure JTCom switch VLANs
@@ -27,7 +27,7 @@
         safety_port_id: 6
         vlans:
           223:
-            name: Test_Ulis_VLAN
+            name: Test_VLAN
             state: present
       register: result
 

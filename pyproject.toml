@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "NAPALM community driver for JTCom CGI-based Ethernet switches"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Ulis Ilya", email = "ulis.ilya@gmail.com" }]
+authors = [{ name = "napalm-jtcom contributors" }]
 keywords = ["napalm", "network", "automation", "jtcom", "switch", "cgi"]
 classifiers = [
     "Development Status :: 3 - Alpha",

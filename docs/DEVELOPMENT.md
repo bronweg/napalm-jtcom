@@ -103,7 +103,7 @@ VIRTUAL_ENV=/path/to/.venv \
 ANSIBLE_CONFIG=ansible.cfg \
 /path/to/.venv/bin/ansible-playbook \
   -i inventory.ini test_playbook.yml \
-  -e jtcom_host=192.168.51.21 -e jtcom_user=admin -e jtcom_pass=admin \
+  -e jtcom_host=192.0.2.1 -e jtcom_user=admin -e jtcom_pass=admin \
   --check
 ```
 

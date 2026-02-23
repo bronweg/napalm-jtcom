@@ -5,9 +5,9 @@
   gather_facts: false
 
   vars:
-    switch_host: 192.168.51.21
-    switch_user: admin
-    switch_pass: admin
+    switch_host: 192.0.2.1
+    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin') }}"
+    switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
 
   tasks:
     - name: Set speed/duplex and enable/disable ports

@@ -3,9 +3,9 @@
 
 Environment variables
 ---------------------
-JTCOM_HOST        Switch base URL or IP (e.g. http://192.168.1.1)
-JTCOM_USERNAME    Login username          (default: admin)
-JTCOM_PASSWORD    Login password          (default: admin)
+JTCOM_HOST        Switch base URL or IP (e.g. http://192.0.2.1)
+JTCOM_USERNAME    Login username          (required)
+JTCOM_PASSWORD    Login password          (required)
 JTCOM_VERIFY_TLS  Set to "true" to verify TLS (default: false)
 """
 
@@ -18,14 +18,19 @@ import sys
 from napalm_jtcom.driver import JTComDriver
 
 
+def _require(name: str) -> str:
+    print(f"ERROR: required environment variable {name!r} is not set.", file=sys.stderr)
+    sys.exit(1)
+
+
 def main() -> None:
     host = os.environ.get("JTCOM_HOST", "")
     if not host:
         print("ERROR: JTCOM_HOST is not set.", file=sys.stderr)
         sys.exit(1)
 
-    username = os.environ.get("JTCOM_USERNAME", "admin")
-    password = os.environ.get("JTCOM_PASSWORD", "admin")
+    username = os.environ.get("JTCOM_USERNAME") or _require("JTCOM_USERNAME")
+    password = os.environ.get("JTCOM_PASSWORD") or _require("JTCOM_PASSWORD")
     verify_tls = os.environ.get("JTCOM_VERIFY_TLS", "false").lower() == "true"
 
     driver = JTComDriver(

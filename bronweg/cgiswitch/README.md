@@ -31,9 +31,9 @@ Idempotent, diff-aware PATCH-style configuration of VLANs and ports.
 ```yaml
 - name: Configure switch
   bronweg.cgiswitch.jtcom_config:
-    host: 192.168.51.21
-    username: admin
-    password: admin
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
     verify_tls: false
     vlans:
       10:

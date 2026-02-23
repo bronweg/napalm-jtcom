@@ -3,11 +3,11 @@
 
 Usage (dry-run, default):
 
-    JTCOM_HOST=192.168.51.21 python examples/apply_device_config.py
+    JTCOM_HOST=192.0.2.1 python examples/apply_device_config.py
 
 Usage (live apply):
 
-    APPLY=1 JTCOM_HOST=192.168.51.21 python examples/apply_device_config.py
+    APPLY=1 JTCOM_HOST=192.0.2.1 python examples/apply_device_config.py
 
 The script builds an incremental DeviceConfig that:
   - Creates/updates VLAN 100 named "example" (state=present).
@@ -15,7 +15,7 @@ The script builds an incremental DeviceConfig that:
   - Leaves all ports at their current settings (no port changes).
 
 Environment variables:
-    JTCOM_HOST        Switch IP or hostname (default: 192.168.51.21).
+    JTCOM_HOST        Switch IP or hostname (default: 192.0.2.1).
     JTCOM_USERNAME    Login username (default: admin).
     JTCOM_PASSWORD    Login password (default: admin).
     APPLY             Set to "1" to apply changes (default: dry-run).
@@ -32,7 +32,7 @@ from napalm_jtcom.driver import JTComDriver
 from napalm_jtcom.model.config import DeviceConfig
 from napalm_jtcom.model.vlan import VlanConfig
 
-HOST = os.getenv("JTCOM_HOST", "192.168.51.21")
+HOST = os.getenv("JTCOM_HOST", "192.0.2.1")
 USERNAME = os.getenv("JTCOM_USERNAME", "admin")
 PASSWORD = os.getenv("JTCOM_PASSWORD", "admin")
 APPLY = os.getenv("APPLY", "0") == "1"

@@ -11,11 +11,11 @@ field:
 
 Usage (dry run, default):
 
-    JTCOM_HOST=192.168.51.21 python examples/apply_vlan.py
+    JTCOM_HOST=192.0.2.1 python examples/apply_vlan.py
 
 Usage (live apply):
 
-    APPLY=1 JTCOM_HOST=192.168.51.21 python examples/apply_vlan.py
+    APPLY=1 JTCOM_HOST=192.0.2.1 python examples/apply_vlan.py
 
 Environment variables:
     JTCOM_HOST        Switch IP or hostname (required).

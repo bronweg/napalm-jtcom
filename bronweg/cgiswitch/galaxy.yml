@@ -18,6 +18,6 @@ repository: https://github.com/bronweg/napalm-jtcom
 documentation: https://github.com/bronweg/napalm-jtcom
 issues: https://github.com/bronweg/napalm-jtcom/issues
 authors:
-- Ulis Ilya <ulis.ilya@gmail.com>
+- napalm-jtcom contributors
 dependencies: {}
 build_ignore: []
