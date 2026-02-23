@@ -52,4 +52,4 @@ See `examples/` for ready-to-run playbooks.
 
 ## License
 
-Apache-2.0
+MIT

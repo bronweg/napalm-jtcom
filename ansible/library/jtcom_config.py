@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # Copyright: (c) 2024, napalm-jtcom contributors
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 """Ansible module stub: jtcom_config.
 
 All execution logic lives in action_plugins/jtcom_config.py which runs in the

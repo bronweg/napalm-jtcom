@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # Copyright: (c) 2024, napalm-jtcom contributors
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 """Ansible action plugin: jtcom_config.
 
 Runs entirely in the Ansible controller Python process — napalm_jtcom is

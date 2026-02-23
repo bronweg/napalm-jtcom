@@ -29,6 +29,12 @@
           223:
             name: Test_VLAN
             state: present
+            tagged_ports: [0, 1, 2, 3, 4, 5, 6, 7]
+        ports:
+          1:
+            admin_up: true
+            speed_duplex: Auto
+            flow_control: false
       register: result
 
     - name: Show result
