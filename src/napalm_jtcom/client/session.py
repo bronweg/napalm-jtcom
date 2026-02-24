@@ -212,6 +212,12 @@ class JTComSession:
         self.logout()
         self._http.close()
 
+    def __enter__(self) -> JTComSession:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------

@@ -24,6 +24,10 @@ class VlanEntry:
     untagged_ports: list[str] = field(default_factory=list)
     active: bool = True
 
+    def __post_init__(self) -> None:
+        if not 1 <= self.vlan_id <= 4094:
+            raise ValueError(f"vlan_id must be 1-4094, got {self.vlan_id}")
+
 
 @dataclass
 class VlanPortConfig:
@@ -61,6 +65,10 @@ class VlanConfig:
     tagged_ports: list[int] = field(default_factory=list)
     untagged_ports: list[int] = field(default_factory=list)
     state: Literal["present", "absent"] = "present"
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.vlan_id <= 4094:
+            raise ValueError(f"vlan_id must be 1-4094, got {self.vlan_id}")
 
 
 @dataclass

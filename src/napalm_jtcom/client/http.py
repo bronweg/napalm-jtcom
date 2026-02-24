@@ -123,6 +123,12 @@ class JTComHTTP:
         """Close the underlying :class:`requests.Session`."""
         self._session.close()
 
+    def __enter__(self) -> JTComHTTP:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

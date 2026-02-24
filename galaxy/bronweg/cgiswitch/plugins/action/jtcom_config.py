@@ -31,6 +31,7 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 return dict(failed=True, msg=f"Parameter '{key}' is required.")
 
         try:
+            from napalm_jtcom.client.errors import JTComError
             from napalm_jtcom.driver import JTComDriver
             from napalm_jtcom.model.config import DeviceConfig
             from napalm_jtcom.model.port import PortConfig
@@ -84,7 +85,7 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 )
             finally:
                 driver.close()
-        except Exception as exc:  # noqa: BLE001
+        except (JTComError, ValueError, ConnectionError) as exc:
             return dict(failed=True, msg=str(exc))
 
         result.update(

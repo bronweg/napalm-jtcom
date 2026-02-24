@@ -24,6 +24,10 @@ class PortSettings:
     speed_duplex: str | None = None
     flow_control: bool | None = None
 
+    def __post_init__(self) -> None:
+        if self.port_id < 1:
+            raise ValueError(f"port_id must be >= 1, got {self.port_id}")
+
 
 @dataclass
 class PortOperStatus:
@@ -65,6 +69,10 @@ class PortConfig:
     admin_up: bool | None = None
     speed_duplex: str | None = None
     flow_control: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.port_id < 1:
+            raise ValueError(f"port_id must be >= 1, got {self.port_id}")
 
 
 @dataclass

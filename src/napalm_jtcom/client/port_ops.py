@@ -136,8 +136,8 @@ def _build_port_payload(
     elif current is not None and current.flow_control is not None:
         flow_control = current.flow_control
     else:
-        # Default to On when unknown
-        flow_control = True
+        # Default to Off when unknown (safer than enabling flow control)
+        flow_control = False
 
     return {
         "portid": str(desired.port_id - 1),   # CGI uses 0-based index

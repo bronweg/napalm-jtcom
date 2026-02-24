@@ -92,9 +92,15 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
     def open(self) -> None:
         """Open an HTTP session and authenticate with the switch.
 
+        If a session is already open it is closed first to prevent resource
+        leaks.
+
         Raises:
             JTComAuthError: If login is rejected by the switch.
         """
+        if self._session is not None:
+            logger.debug("Session already open; closing before re-open")
+            self.close()
         base_url = self._build_base_url()
         logger.info("Opening connection to %s", base_url)
         creds = JTComCredentials(username=self.username, password=self.password)
@@ -139,6 +145,15 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         # Prefer the IP from the page; fall back to the configured hostname.
         hostname = device_info.ip_address or self.hostname
 
+        # Populate interface_list from port settings page.
+        try:
+            port_html = session.get(PORT_SETTINGS)
+            settings_list, _ = parse_port_page(port_html)
+            interface_list = [s.name for s in settings_list]
+        except JTComError:
+            logger.warning("Failed to fetch port list for interface_list", exc_info=True)
+            interface_list = []
+
         return {
             "hostname": hostname,
             "fqdn": hostname,
@@ -147,7 +162,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             "serial_number": device_info.serial_number or "",
             "os_version": device_info.firmware_version or "",
             "uptime": parse_uptime_seconds(device_info.uptime),
-            "interface_list": [],
+            "interface_list": interface_list,
         }
 
     def get_interfaces(self) -> dict[str, Any]:
@@ -211,28 +226,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             JTComParseError: If either VLAN page cannot be parsed.
         """
         session = self._require_session()
-        static_html = session.get(VLAN_STATIC, params={"page": "static"})
-        port_html = session.get(VLAN_PORT_BASED, params={"page": "port_based"})
-
-        vlans = parse_static_vlans(static_html)
-        port_configs = parse_port_vlan_settings(port_html)
-
-        vlan_map = {v.vlan_id: v for v in vlans}
-
-        for pc in port_configs:
-            if pc.vlan_type.lower() == "access" and pc.access_vlan is not None:
-                entry = vlan_map.get(pc.access_vlan)
-                if entry is not None:
-                    entry.untagged_ports.append(pc.port_name)
-            elif pc.vlan_type.lower() == "trunk":
-                if pc.native_vlan is not None:
-                    entry = vlan_map.get(pc.native_vlan)
-                    if entry is not None:
-                        entry.untagged_ports.append(pc.port_name)
-                for vid in pc.permit_vlans:
-                    entry = vlan_map.get(vid)
-                    if entry is not None:
-                        entry.tagged_ports.append(pc.port_name)
+        vlan_map = self._fetch_vlan_state(session)
 
         result: dict[str, Any] = {}
         for vid, ve in sorted(vlan_map.items()):
@@ -277,26 +271,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         session = self._require_session()
 
         # --- Fetch current state ---
-        static_html = session.get(VLAN_STATIC, params={"page": "static"})
-        port_html = session.get(VLAN_PORT_BASED, params={"page": "port_based"})
-        vlans = parse_static_vlans(static_html)
-        port_configs = parse_port_vlan_settings(port_html)
-
-        vlan_map: dict[int, VlanEntry] = {v.vlan_id: v for v in vlans}
-        for pc in port_configs:
-            if pc.vlan_type.lower() == "access" and pc.access_vlan is not None:
-                entry = vlan_map.get(pc.access_vlan)
-                if entry is not None:
-                    entry.untagged_ports.append(pc.port_name)
-            elif pc.vlan_type.lower() == "trunk":
-                if pc.native_vlan is not None:
-                    entry = vlan_map.get(pc.native_vlan)
-                    if entry is not None:
-                        entry.untagged_ports.append(pc.port_name)
-                for vid in pc.permit_vlans:
-                    entry = vlan_map.get(vid)
-                    if entry is not None:
-                        entry.tagged_ports.append(pc.port_name)
+        vlan_map = self._fetch_vlan_state(session)
 
         # --- Plan changes ---
         change_set = plan_vlan_changes(vlan_map, desired_vlans)
@@ -313,18 +288,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
 
         # --- Backup before change ---
         if self.optional_args.get("backup_before_change", True):
-            backup_dir = pathlib.Path(
-                str(self.optional_args.get("backup_dir", "./backups"))
-            )
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            safe_host = self.hostname.replace("://", "_").replace("/", "_").replace(":", "_")
-            filename = f"jtcom_{safe_host}_{ts}_switch_cfg.bin"
-            backup_path = backup_dir / filename
-            raw = session.download_config_backup()
-            backup_path.write_bytes(raw)
-            result["backup_file"] = str(backup_path)
-            logger.info("Config backup saved to %s (%d bytes)", backup_path, len(raw))
+            result["backup_file"] = self._save_backup(session)
 
         # --- Apply creates (ascending VID) ---
         for cfg in change_set.create:
@@ -429,18 +393,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             else bool(self.optional_args.get("backup_before_change", True))
         )
         if do_backup:
-            backup_dir = pathlib.Path(
-                str(self.optional_args.get("backup_dir", "./backups"))
-            )
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            safe_host = self.hostname.replace("://", "_").replace("/", "_").replace(":", "_")
-            filename = f"jtcom_{safe_host}_{ts}_switch_cfg.bin"
-            backup_path = backup_dir / filename
-            raw = session.download_config_backup()
-            backup_path.write_bytes(raw)
-            result["backup_file"] = str(backup_path)
-            logger.info("Config backup saved to %s (%d bytes)", backup_path, len(raw))
+            result["backup_file"] = self._save_backup(session)
 
         # --- Apply changes in ascending port_id order ---
         apply_port_changes(session, settings_list, change_set)
@@ -573,26 +526,27 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             "applied": applied,
         }
 
-    def _read_current_state(
-        self, session: JTComSession
-    ) -> tuple[dict[int, VlanEntry], list[PortSettings]]:
-        """Read VLANs and ports from the switch and return both.
+    def _fetch_vlan_state(self, session: JTComSession) -> dict[int, VlanEntry]:
+        """Fetch static VLANs and port-based VLAN settings, merge into a map.
+
+        Reads the static VLAN list and per-port VLAN configuration from the
+        switch, then populates each :class:`VlanEntry` with its tagged and
+        untagged port memberships.
 
         Args:
             session: Active authenticated session.
 
         Returns:
-            A tuple of ``(vlan_map, settings_list)`` where ``vlan_map`` is a
-            ``dict[int, VlanEntry]`` (with port memberships populated) and
-            ``settings_list`` is a ``list[PortSettings]``.
+            A ``dict[int, VlanEntry]`` keyed by VLAN ID with port memberships
+            populated.
         """
         static_html = session.get(VLAN_STATIC, params={"page": "static"})
         port_html = session.get(VLAN_PORT_BASED, params={"page": "port_based"})
         vlans = parse_static_vlans(static_html)
-        port_vlan_configs = parse_port_vlan_settings(port_html)
+        port_configs = parse_port_vlan_settings(port_html)
 
         vlan_map: dict[int, VlanEntry] = {v.vlan_id: v for v in vlans}
-        for pc in port_vlan_configs:
+        for pc in port_configs:
             if pc.vlan_type.lower() == "access" and pc.access_vlan is not None:
                 entry = vlan_map.get(pc.access_vlan)
                 if entry is not None:
@@ -606,6 +560,22 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
                     entry = vlan_map.get(vid)
                     if entry is not None:
                         entry.tagged_ports.append(pc.port_name)
+        return vlan_map
+
+    def _read_current_state(
+        self, session: JTComSession
+    ) -> tuple[dict[int, VlanEntry], list[PortSettings]]:
+        """Read VLANs and ports from the switch and return both.
+
+        Args:
+            session: Active authenticated session.
+
+        Returns:
+            A tuple of ``(vlan_map, settings_list)`` where ``vlan_map`` is a
+            ``dict[int, VlanEntry]`` (with port memberships populated) and
+            ``settings_list`` is a ``list[PortSettings]``.
+        """
+        vlan_map = self._fetch_vlan_state(session)
 
         port_html2 = session.get(PORT_SETTINGS)
         settings_list, _ = parse_port_page(port_html2)

@@ -136,12 +136,12 @@ def build_device_plan(
         if cfg.name is not None and cfg.name != entry.name:
             diffs["name"] = {"from": entry.name, "to": cfg.name}
 
-        if sorted(cfg.tagged_ports) != sorted(entry.tagged_ports):
+        if set(cfg.tagged_ports) != set(entry.tagged_ports):
             diffs["tagged_ports"] = {
                 "from": sorted(entry.tagged_ports),
                 "to": sorted(cfg.tagged_ports),
             }
-        if sorted(cfg.untagged_ports) != sorted(entry.untagged_ports):
+        if set(cfg.untagged_ports) != set(entry.untagged_ports):
             diffs["untagged_ports"] = {
                 "from": sorted(entry.untagged_ports),
                 "to": sorted(cfg.untagged_ports),

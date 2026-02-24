@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from napalm_jtcom.model.port import PortConfig, PortSettings
 from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -48,11 +51,17 @@ class DeviceConfig:
                 idx = _port_name_to_index(name)
                 if idx is not None:
                     tagged.append(idx)
+                else:
+                    logger.warning("Skipping unparseable tagged port name %r in VLAN %d", name, vid)
             untagged: list[int] = []
             for name in entry.untagged_ports:
                 idx = _port_name_to_index(name)
                 if idx is not None:
                     untagged.append(idx)
+                else:
+                    logger.warning(
+                        "Skipping unparseable untagged port name %r in VLAN %d", name, vid
+                    )
             vlans[vid] = VlanConfig(
                 vlan_id=vid,
                 name=entry.name,
