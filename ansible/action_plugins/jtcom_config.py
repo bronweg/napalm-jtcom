@@ -8,9 +8,27 @@ imported directly with no subprocess or bootstrap tricks required.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from ansible.plugins.action import ActionBase
+from ansible.utils.display import Display
+
+log_display = Display()
+
+class AnsibleStream:
+    def write(self, data):
+        log_display.display(data.strip())
+
+    def flush(self):
+        pass
+
+logging.basicConfig(
+    level=logging.DEBUG,  # Set the minimum level to log (e.g., DEBUG, INFO, WARNING)
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", # Log message format
+    stream=AnsibleStream() # Redirect logs to Ansible display system
+)
+
 
 
 class ActionModule(ActionBase):  # type: ignore[misc]

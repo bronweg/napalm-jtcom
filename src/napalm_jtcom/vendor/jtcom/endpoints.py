@@ -8,7 +8,8 @@ from __future__ import annotations
 
 # Authentication
 LOGIN: str = "/login.cgi"
-LOGOUT: str = "/logout.cgi"
+
+SYSCMD: str = "/syscmd.cgi"
 
 # Device / system
 DEVICE_INFO: str = "/info.cgi"

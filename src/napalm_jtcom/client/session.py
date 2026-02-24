@@ -14,7 +14,7 @@ from napalm_jtcom.client.errors import (
     JTComSwitchError,
 )
 from napalm_jtcom.client.http import JTComHTTP
-from napalm_jtcom.vendor.jtcom.endpoints import CONFIG_BACKUP, LOGIN, LOGOUT
+from napalm_jtcom.vendor.jtcom.endpoints import CONFIG_BACKUP, LOGIN, SYSCMD
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class JTComSession:
         session as logged out regardless of the outcome.
         """
         try:
-            self._http.post_form(LOGOUT, data={"cmd": "logout"})
+            self._http.post_form(SYSCMD, data={"cmd": "logout"})
         except Exception:  # noqa: BLE001
             logger.debug("Logout request failed (ignored)", exc_info=True)
         finally:
