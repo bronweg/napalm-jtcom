@@ -62,6 +62,44 @@ def test_normalize_vlan_preserves_other_fields() -> None:
     assert result.name == "mgmt"
 
 
+class TestNormalizeVlanConfigSemantics:
+    def test_none_stays_none(self) -> None:
+        cfg = VlanConfig(vlan_id=20, tagged_ports=None, untagged_ports=None)
+        result = normalize_vlan_config(cfg)
+        assert result.tagged_ports is None
+        assert result.untagged_ports is None
+
+    def test_empty_list_stays_empty_list(self) -> None:
+        cfg = VlanConfig(vlan_id=20, tagged_ports=[], untagged_ports=[])
+        result = normalize_vlan_config(cfg)
+        assert result.tagged_ports == []
+        assert result.untagged_ports == []
+
+    def test_deduplication_works_for_explicit_lists(self) -> None:
+        cfg = VlanConfig(vlan_id=20, tagged_ports=[1, 1, 2], untagged_ports=[3, 3])
+        result = normalize_vlan_config(cfg)
+        assert result.tagged_ports == [1, 2]
+        assert result.untagged_ports == [3]
+
+    def test_untagged_wins_on_overlap_for_lists(self) -> None:
+        cfg = VlanConfig(vlan_id=20, tagged_ports=[1, 2], untagged_ports=[2, 3])
+        result = normalize_vlan_config(cfg)
+        assert result.tagged_ports == [1]
+        assert result.untagged_ports == [2, 3]
+
+    def test_tagged_none_with_untagged_list(self) -> None:
+        cfg = VlanConfig(vlan_id=20, tagged_ports=None, untagged_ports=[2, 3])
+        result = normalize_vlan_config(cfg)
+        assert result.tagged_ports is None
+        assert result.untagged_ports == [2, 3]
+
+    def test_untagged_none_with_tagged_list(self) -> None:
+        cfg = VlanConfig(vlan_id=20, tagged_ports=[1, 2], untagged_ports=None)
+        result = normalize_vlan_config(cfg)
+        assert result.tagged_ports == [1, 2]
+        assert result.untagged_ports is None
+
+
 # ---------------------------------------------------------------------------
 # normalize_port_config
 # ---------------------------------------------------------------------------
