@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from napalm_jtcom.model.config import DeviceConfig
+from napalm_jtcom.model.vlan import VlanConfig
 
 ChangeKind = Literal["vlan_create", "vlan_update", "vlan_delete", "port_update"]
 
@@ -123,8 +124,8 @@ def build_device_plan(
                     details={
                         "vlan_id": vid,
                         "name": cfg.name,
-                        "tagged_ports": list(cfg.tagged_ports),
-                        "untagged_ports": list(cfg.untagged_ports),
+                        "tagged_ports": sorted(_new_vlan_side_membership(cfg, "tagged")),
+                        "untagged_ports": sorted(_new_vlan_side_membership(cfg, "untagged")),
                     },
                 )
             )
@@ -136,16 +137,8 @@ def build_device_plan(
         if cfg.name is not None and cfg.name != entry.name:
             diffs["name"] = {"from": entry.name, "to": cfg.name}
 
-        if set(cfg.tagged_ports) != set(entry.tagged_ports):
-            diffs["tagged_ports"] = {
-                "from": sorted(entry.tagged_ports),
-                "to": sorted(cfg.tagged_ports),
-            }
-        if set(cfg.untagged_ports) != set(entry.untagged_ports):
-            diffs["untagged_ports"] = {
-                "from": sorted(entry.untagged_ports),
-                "to": sorted(cfg.untagged_ports),
-            }
+        membership_diffs = _vlan_membership_diffs(entry, cfg)
+        diffs.update(membership_diffs)
 
         if diffs:
             updates.append(
@@ -206,3 +199,51 @@ def build_device_plan(
         "vlan_delete": len(deletes),
     }
     return DevicePlan(changes=all_changes, summary=summary)
+
+
+def _vlan_membership_diffs(current: VlanConfig, desired: VlanConfig) -> dict[str, Any]:
+    """Return VLAN membership diffs while preserving omitted-field semantics."""
+    current_tagged = set(current.tagged_ports or [])
+    current_untagged = set(current.untagged_ports or [])
+    membership = desired.normalized_membership()
+
+    tagged = membership["tagged"]
+    tagged_set = tagged["set"]
+    if tagged_set is not None:
+        new_tagged = set(tagged_set)
+    else:
+        new_tagged = set(current_tagged)
+        new_tagged.update(tagged["add"] or set())
+        new_tagged.difference_update(tagged["remove"] or set())
+
+    untagged = membership["untagged"]
+    untagged_set = untagged["set"]
+    if untagged_set is not None:
+        new_untagged = set(untagged_set)
+    else:
+        new_untagged = set(current_untagged)
+        new_untagged.update(untagged["add"] or set())
+        new_untagged.difference_update(untagged["remove"] or set())
+
+    new_tagged.difference_update(new_untagged)
+
+    diffs: dict[str, Any] = {}
+    if new_tagged != current_tagged:
+        diffs["tagged_ports"] = {
+            "from": sorted(current_tagged),
+            "to": sorted(new_tagged),
+        }
+    if new_untagged != current_untagged:
+        diffs["untagged_ports"] = {
+            "from": sorted(current_untagged),
+            "to": sorted(new_untagged),
+        }
+    return diffs
+
+
+def _new_vlan_side_membership(cfg: VlanConfig, side: Literal["tagged", "untagged"]) -> set[int]:
+    membership = cfg.normalized_membership()[side]
+    explicit_set = membership["set"]
+    if explicit_set is not None:
+        return set(explicit_set)
+    return set(membership["add"] or set())

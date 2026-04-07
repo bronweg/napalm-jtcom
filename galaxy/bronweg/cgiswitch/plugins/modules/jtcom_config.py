@@ -39,6 +39,10 @@ options:
     description: Download and save a config backup before applying any change.
     type: bool
     default: true
+  allow_port_mode_change:
+    description: Allow VLAN membership operations to change a port between access and trunk mode.
+    type: bool
+    default: false
   vlans:
     description: >
       Incremental VLAN changes, keyed by VLAN ID (string or int).
@@ -124,6 +128,10 @@ applied:
   type: list
   elements: str
   returned: always
+warnings:
+  description: VLAN membership safety warnings, including check-mode access/trunk transitions.
+  type: list
+  returned: always
 """
 
 from ansible.module_utils.basic import AnsibleModule  # noqa: E402  # type: ignore[import-untyped]
@@ -137,6 +145,7 @@ def main() -> None:
             password=dict(type="str", required=True, no_log=True),
             verify_tls=dict(type="bool", default=True),
             backup_before_change=dict(type="bool", default=True),
+            allow_port_mode_change=dict(type="bool", default=False),
             vlans=dict(type="dict"),
             ports=dict(type="dict"),
         ),

@@ -60,9 +60,10 @@ def plan_vlan_changes(
 
             current_untagged_idx = _port_names_to_indices(set(entry.untagged_ports))
             current_tagged_idx = _port_names_to_indices(set(entry.tagged_ports))
-            membership_changed = (
-                set(cfg.untagged_ports) != current_untagged_idx
-                or set(cfg.tagged_ports) != current_tagged_idx
+            membership_changed = _membership_changed(
+                current_tagged_idx,
+                current_untagged_idx,
+                cfg,
             )
 
             if name_changed or membership_changed:
@@ -79,3 +80,33 @@ def _port_names_to_indices(names: set[str]) -> set[int]:
         if len(parts) == 2 and parts[1].isdigit():
             indices.add(int(parts[1]) - 1)
     return indices
+
+
+def _membership_changed(
+    current_tagged: set[int],
+    current_untagged: set[int],
+    cfg: VlanConfig,
+) -> bool:
+    """Return whether *cfg* changes this VLAN's own membership dimension."""
+    membership = cfg.normalized_membership()
+
+    tagged = membership["tagged"]
+    tagged_set = tagged["set"]
+    if tagged_set is not None:
+        new_tagged = set(tagged_set)
+    else:
+        new_tagged = set(current_tagged)
+        new_tagged.update(tagged["add"] or set())
+        new_tagged.difference_update(tagged["remove"] or set())
+
+    untagged = membership["untagged"]
+    untagged_set = untagged["set"]
+    if untagged_set is not None:
+        new_untagged = set(untagged_set)
+    else:
+        new_untagged = set(current_untagged)
+        new_untagged.update(untagged["add"] or set())
+        new_untagged.difference_update(untagged["remove"] or set())
+
+    new_tagged.difference_update(new_untagged)
+    return new_tagged != current_tagged or new_untagged != current_untagged

@@ -46,8 +46,14 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             vlans[vid] = VlanConfig(
                 vlan_id=vid,
                 name=entry.get("name"),
-                tagged_ports=[int(x) for x in entry.get("tagged_ports", [])],
-                untagged_ports=[int(x) for x in entry.get("untagged_ports", [])],
+                tagged_ports=_int_list_or_none(entry, "tagged_ports"),
+                untagged_ports=_int_list_or_none(entry, "untagged_ports"),
+                tagged_add=_int_list_or_none(entry, "tagged_add"),
+                tagged_remove=_int_list_or_none(entry, "tagged_remove"),
+                tagged_set=_int_list_or_none(entry, "tagged_set"),
+                untagged_add=_int_list_or_none(entry, "untagged_add"),
+                untagged_remove=_int_list_or_none(entry, "untagged_remove"),
+                untagged_set=_int_list_or_none(entry, "untagged_set"),
                 state=entry.get("state", "present"),
             )
 
@@ -68,6 +74,7 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             "verify_tls": p.get("verify_tls", True),
             "backup_before_change": p.get("backup_before_change", True),
             "safety_port_id": 6,
+            "allow_port_mode_change": p.get("allow_port_mode_change", False),
         }
 
         try:
@@ -93,5 +100,14 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             diff=cfg_result["diff"],
             backup_file=cfg_result.get("backup_file", ""),
             applied=cfg_result.get("applied", []),
+            warnings=cfg_result.get("warnings", []),
+            changed_ports=cfg_result.get("changed_ports", []),
+            changed_vlans=cfg_result.get("changed_vlans", []),
         )
         return result
+
+
+def _int_list_or_none(entry: dict[str, Any], key: str) -> list[int] | None:
+    if key not in entry or entry[key] is None:
+        return None
+    return [int(x) for x in entry[key]]
