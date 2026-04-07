@@ -15,6 +15,7 @@ VLANs not mentioned in *desired* are left untouched.
 from __future__ import annotations
 
 from napalm_jtcom.model.vlan import VlanChangeSet, VlanConfig, VlanEntry
+from napalm_jtcom.utils.vlan_membership import apply_vlan_membership_config
 
 
 def plan_vlan_changes(
@@ -88,25 +89,9 @@ def _membership_changed(
     cfg: VlanConfig,
 ) -> bool:
     """Return whether *cfg* changes this VLAN's own membership dimension."""
-    membership = cfg.normalized_membership()
-
-    tagged = membership["tagged"]
-    tagged_set = tagged["set"]
-    if tagged_set is not None:
-        new_tagged = set(tagged_set)
-    else:
-        new_tagged = set(current_tagged)
-        new_tagged.update(tagged["add"] or set())
-        new_tagged.difference_update(tagged["remove"] or set())
-
-    untagged = membership["untagged"]
-    untagged_set = untagged["set"]
-    if untagged_set is not None:
-        new_untagged = set(untagged_set)
-    else:
-        new_untagged = set(current_untagged)
-        new_untagged.update(untagged["add"] or set())
-        new_untagged.difference_update(untagged["remove"] or set())
-
-    new_tagged.difference_update(new_untagged)
+    new_tagged, new_untagged = apply_vlan_membership_config(
+        current_tagged,
+        current_untagged,
+        cfg,
+    )
     return new_tagged != current_tagged or new_untagged != current_untagged

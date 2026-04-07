@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 from napalm_jtcom.model.config import DeviceConfig
 from napalm_jtcom.model.vlan import VlanConfig
+from napalm_jtcom.utils.vlan_membership import NullablePortSet, apply_vlan_membership_config
 
 ChangeKind = Literal["vlan_create", "vlan_update", "vlan_delete", "port_update"]
 
@@ -117,6 +118,11 @@ def build_device_plan(
 
         # state == "present"
         if vid not in current.vlans:
+            tagged, untagged = apply_vlan_membership_config(set(), set(), cfg)
+            if tagged is None or untagged is None:
+                raise AssertionError(
+                    f"Internal invariant violated: new VLAN {vid} membership must be concrete"
+                )
             creates.append(
                 Change(
                     kind="vlan_create",
@@ -124,8 +130,8 @@ def build_device_plan(
                     details={
                         "vlan_id": vid,
                         "name": cfg.name,
-                        "tagged_ports": sorted(_new_vlan_side_membership(cfg, "tagged")),
-                        "untagged_ports": sorted(_new_vlan_side_membership(cfg, "untagged")),
+                        "tagged_ports": sorted(tagged),
+                        "untagged_ports": sorted(untagged),
                     },
                 )
             )
@@ -203,47 +209,59 @@ def build_device_plan(
 
 def _vlan_membership_diffs(current: VlanConfig, desired: VlanConfig) -> dict[str, Any]:
     """Return VLAN membership diffs while preserving omitted-field semantics."""
-    current_tagged = set(current.tagged_ports or [])
-    current_untagged = set(current.untagged_ports or [])
+    current_tagged: NullablePortSet = (
+        None if current.tagged_ports is None else set(current.tagged_ports)
+    )
+    current_untagged: NullablePortSet = (
+        None if current.untagged_ports is None else set(current.untagged_ports)
+    )
+
+    new_tagged, new_untagged = apply_vlan_membership_config(
+        current_tagged,
+        current_untagged,
+        desired,
+    )
     membership = desired.normalized_membership()
 
-    tagged = membership["tagged"]
-    tagged_set = tagged["set"]
-    if tagged_set is not None:
-        new_tagged = set(tagged_set)
-    else:
-        new_tagged = set(current_tagged)
-        new_tagged.update(tagged["add"] or set())
-        new_tagged.difference_update(tagged["remove"] or set())
-
-    untagged = membership["untagged"]
-    untagged_set = untagged["set"]
-    if untagged_set is not None:
-        new_untagged = set(untagged_set)
-    else:
-        new_untagged = set(current_untagged)
-        new_untagged.update(untagged["add"] or set())
-        new_untagged.difference_update(untagged["remove"] or set())
-
-    new_tagged.difference_update(new_untagged)
-
     diffs: dict[str, Any] = {}
-    if new_tagged != current_tagged:
-        diffs["tagged_ports"] = {
-            "from": sorted(current_tagged),
-            "to": sorted(new_tagged),
-        }
-    if new_untagged != current_untagged:
-        diffs["untagged_ports"] = {
-            "from": sorted(current_untagged),
-            "to": sorted(new_untagged),
-        }
+    tagged_diff = _membership_side_diff(
+        current_tagged,
+        new_tagged,
+        _side_touched(membership["tagged"]),
+    )
+    if tagged_diff is not None:
+        diffs["tagged_ports"] = tagged_diff
+
+    untagged_diff = _membership_side_diff(
+        current_untagged,
+        new_untagged,
+        _side_touched(membership["untagged"]),
+    )
+    if untagged_diff is not None:
+        diffs["untagged_ports"] = untagged_diff
     return diffs
 
 
-def _new_vlan_side_membership(cfg: VlanConfig, side: Literal["tagged", "untagged"]) -> set[int]:
-    membership = cfg.normalized_membership()[side]
-    explicit_set = membership["set"]
-    if explicit_set is not None:
-        return set(explicit_set)
-    return set(membership["add"] or set())
+def _membership_side_diff(
+    current: NullablePortSet,
+    new: NullablePortSet,
+    touched: bool,
+) -> dict[str, Any] | None:
+    if current == new and not (touched and current is None):
+        return None
+
+    diff: dict[str, Any] = {
+        "from": None if current is None else sorted(current),
+        "to": None if new is None else sorted(new),
+    }
+    if touched and new is None:
+        diff["note"] = "unknown current membership; add/remove target cannot be rendered fully"
+        diff["meta"] = {
+            "unknown_membership": True,
+            "reason": "unknown_current_baseline_with_add_remove",
+        }
+    return diff
+
+
+def _side_touched(operation: dict[str, set[int] | None]) -> bool:
+    return operation["set"] is not None or bool(operation["add"]) or bool(operation["remove"])

@@ -135,6 +135,23 @@ class TestUpdateMembership:
         cs = plan_vlan_changes(current, desired)
         assert cs.update == []
 
+    def test_tagged_remove_only_detected(self) -> None:
+        current = {
+            10: make_entry(
+                10,
+                tagged_ports=["Port 11", "Port 21", "Port 31"],
+            )
+        }
+        desired = {10: make_cfg(10, tagged_remove=[20])}
+        cs = plan_vlan_changes(current, desired)
+        assert [u.vlan_id for u in cs.update] == [10]
+
+    def test_tagged_add_remove_detected(self) -> None:
+        current = {10: make_entry(10, tagged_ports=["Port 11", "Port 21"])}
+        desired = {10: make_cfg(10, tagged_add=[30], tagged_remove=[10])}
+        cs = plan_vlan_changes(current, desired)
+        assert [u.vlan_id for u in cs.update] == [10]
+
 
 # ---------------------------------------------------------------------------
 # Edge cases

@@ -16,6 +16,7 @@ from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
 PortMode = Literal["access", "trunk", "none"]
 PortMembershipState = dict[str, int | set[int] | None]
 PortMembershipMap = dict[int, PortMembershipState]
+NullablePortSet = set[int] | None
 
 
 class PortVlanIntent(TypedDict):
@@ -26,6 +27,10 @@ class PortVlanIntent(TypedDict):
     permit_vlans: list[int]
 
 _MODE_CHANGE_HINT = "Set allow_port_mode_change=true to allow this access/trunk transition."
+_NONE_MODE_HINT = (
+    "JTCom CGI supports only access/trunk VLAN port modes; desired mode 'none' "
+    "cannot be applied safely."
+)
 
 
 class VlanMembershipModeChangeError(ValueError):
@@ -41,6 +46,21 @@ class VlanMembershipModeChangeError(ValueError):
             for w in warnings
         )
         super().__init__(f"VLAN port mode change blocked: {details}. {_MODE_CHANGE_HINT}")
+
+
+class VlanMembershipUnsupportedModeError(ValueError):
+    """Raised when the desired VLAN membership cannot be represented on JTCom CGI."""
+
+    def __init__(self, warnings: list[dict[str, Any]]) -> None:
+        self.warnings = warnings
+        details = "; ".join(
+            (
+                f"port_id={w['port_id']} desired_state={w['desired_state']} "
+                f"hint={w['hint']}"
+            )
+            for w in warnings
+        )
+        super().__init__(f"Unsupported VLAN port mode requested: {details}")
 
 
 @dataclass
@@ -132,15 +152,22 @@ def plan_vlan_membership_changes(
         _apply_vlan_config(desired, cfg)
 
     normalize_tagged_untagged_consistency(desired)
-    warnings = detect_mode_change_warnings(current, desired)
-    if warnings and not allow_port_mode_change and not check_mode:
-        raise VlanMembershipModeChangeError(warnings)
+    desired_port_vlan = build_desired_port_vlan(desired)
+    changed = changed_ports(current, desired)
+    mode_change_warnings = detect_mode_change_warnings(current, desired)
+    unsupported_mode_warnings = detect_unsupported_mode_warnings(desired_port_vlan, changed)
+    warnings = mode_change_warnings + unsupported_mode_warnings
+
+    if unsupported_mode_warnings and not check_mode:
+        raise VlanMembershipUnsupportedModeError(unsupported_mode_warnings)
+    if mode_change_warnings and not allow_port_mode_change and not check_mode:
+        raise VlanMembershipModeChangeError(mode_change_warnings)
 
     return VlanMembershipPlan(
         current_per_port=current,
         desired_per_port=desired,
-        desired_port_vlan=build_desired_port_vlan(desired),
-        changed_ports=changed_ports(current, desired),
+        desired_port_vlan=desired_port_vlan,
+        changed_ports=changed,
         changed_vlans=changed_vlans(current, desired),
         warnings=warnings,
     )
@@ -189,6 +216,30 @@ def detect_mode_change_warnings(
                     "current_mode": current_mode,
                     "desired_mode": desired_mode,
                     "hint": _MODE_CHANGE_HINT,
+                }
+            )
+    return warnings
+
+
+def detect_unsupported_mode_warnings(
+    desired_port_vlan: dict[int, PortVlanIntent],
+    changed_port_ids: Iterable[int],
+) -> list[dict[str, Any]]:
+    """Return changed ports whose desired mode is unsupported by the write API."""
+    warnings: list[dict[str, Any]] = []
+    for port_id in sorted(changed_port_ids):
+        intent = desired_port_vlan[port_id]
+        if intent["mode"] == "none":
+            warnings.append(
+                {
+                    "type": "unsupported_vlan_port_mode",
+                    "port_id": port_id,
+                    "desired_mode": "none",
+                    "desired_state": {
+                        "native_vlan": intent["native_vlan"],
+                        "permit_vlans": list(intent["permit_vlans"]),
+                    },
+                    "hint": _NONE_MODE_HINT,
                 }
             )
     return warnings
@@ -285,6 +336,50 @@ def diff_membership_maps(
             },
         }
     return diffs
+
+
+def apply_vlan_membership_config(
+    current_tagged: NullablePortSet,
+    current_untagged: NullablePortSet,
+    cfg: VlanConfig,
+) -> tuple[NullablePortSet, NullablePortSet]:
+    """Apply one VLAN config to current VLAN-centric port sets.
+
+    ``None`` current values are preserved as an unknown baseline when the
+    desired operation is add/remove.  A resulting diff can therefore report an
+    unknown target rather than fabricating ``[]``.
+    """
+    membership = cfg.normalized_membership()
+    new_tagged = apply_vlan_membership_side(current_tagged, membership["tagged"])
+    new_untagged = apply_vlan_membership_side(current_untagged, membership["untagged"])
+    if new_tagged is not None and new_untagged is not None:
+        new_tagged.difference_update(new_untagged)
+    return new_tagged, new_untagged
+
+
+def apply_vlan_membership_side(
+    current: NullablePortSet,
+    operation: dict[str, set[int] | None],
+) -> NullablePortSet:
+    """Apply set/add/remove to one VLAN membership side.
+
+    If *current* is ``None`` and the operation is additive/subtractive, the
+    resulting full membership remains unknown.  Explicit ``set`` always yields
+    a concrete set, including an explicit empty set.
+    """
+    explicit_set = operation["set"]
+    if explicit_set is not None:
+        return set(explicit_set)
+
+    add = operation["add"] or set()
+    remove = operation["remove"] or set()
+    if current is None:
+        return None
+
+    result = set(current)
+    result.update(add)
+    result.difference_update(remove)
+    return result
 
 
 def _apply_vlan_config(desired_per_port: PortMembershipMap, cfg: VlanConfig) -> None:

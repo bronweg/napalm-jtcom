@@ -134,6 +134,79 @@ def test_vlan_update_membership_change() -> None:
     assert plan.changes[0].kind == "vlan_update"
 
 
+def test_vlan_update_preserves_none_membership_when_side_omitted() -> None:
+    cur = _cfg(
+        vlans={
+            10: VlanConfig(
+                vlan_id=10,
+                name="data",
+                tagged_ports=None,
+                untagged_ports=[],
+            )
+        }
+    )
+    des = _cfg(vlans={10: VlanConfig(vlan_id=10)})
+    plan = build_device_plan(cur, des)
+    assert plan.changes == []
+
+
+def test_vlan_update_remove_only_membership_diff_shows_resulting_membership() -> None:
+    cur = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_ports=[10, 20, 30])})
+    des = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_remove=[20])})
+    plan = build_device_plan(cur, des)
+    assert len(plan.changes) == 1
+    assert plan.changes[0].details["tagged_ports"] == {
+        "from": [10, 20, 30],
+        "to": [10, 30],
+    }
+    assert "meta" not in plan.changes[0].details["tagged_ports"]
+
+
+def test_vlan_update_add_remove_membership_diff_shows_resulting_membership() -> None:
+    cur = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_ports=[10, 20])})
+    des = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_add=[30], tagged_remove=[10])})
+    plan = build_device_plan(cur, des)
+    assert len(plan.changes) == 1
+    assert plan.changes[0].details["tagged_ports"] == {
+        "from": [10, 20],
+        "to": [20, 30],
+    }
+    assert "meta" not in plan.changes[0].details["tagged_ports"]
+
+
+def test_vlan_update_unknown_baseline_add_remove_has_structured_meta() -> None:
+    cur = _cfg(
+        vlans={10: VlanConfig(vlan_id=10, tagged_ports=None, untagged_ports=[])}
+    )
+    des = _cfg(vlans={10: VlanConfig(vlan_id=10, tagged_add=[3], tagged_remove=[1])})
+    plan = build_device_plan(cur, des)
+    assert len(plan.changes) == 1
+    tagged_diff = plan.changes[0].details["tagged_ports"]
+    assert tagged_diff["from"] is None
+    assert tagged_diff["to"] is None
+    assert "unknown current membership" in tagged_diff["note"]
+    assert tagged_diff["meta"] == {
+        "unknown_membership": True,
+        "reason": "unknown_current_baseline_with_add_remove",
+    }
+
+
+def test_new_vlan_create_unknown_membership_is_internal_invariant_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from napalm_jtcom.utils import device_diff as dd
+
+    monkeypatch.setattr(
+        dd,
+        "apply_vlan_membership_config",
+        lambda _tagged, _untagged, _cfg: (None, set()),
+    )
+    cur = _cfg()
+    des = _cfg(vlans={20: VlanConfig(vlan_id=20)})
+    with pytest.raises(AssertionError, match="Internal invariant violated"):
+        build_device_plan(cur, des)
+
+
 # ---------------------------------------------------------------------------
 # VLAN deletes
 # ---------------------------------------------------------------------------
