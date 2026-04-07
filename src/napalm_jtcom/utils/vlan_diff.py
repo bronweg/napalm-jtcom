@@ -15,6 +15,7 @@ VLANs not mentioned in *desired* are left untouched.
 from __future__ import annotations
 
 from napalm_jtcom.model.vlan import VlanChangeSet, VlanConfig, VlanEntry
+from napalm_jtcom.utils.vlan_membership import apply_vlan_membership_config
 
 
 def plan_vlan_changes(
@@ -60,9 +61,10 @@ def plan_vlan_changes(
 
             current_untagged_idx = _port_names_to_indices(set(entry.untagged_ports))
             current_tagged_idx = _port_names_to_indices(set(entry.tagged_ports))
-            membership_changed = (
-                set(cfg.untagged_ports) != current_untagged_idx
-                or set(cfg.tagged_ports) != current_tagged_idx
+            membership_changed = _membership_changed(
+                current_tagged_idx,
+                current_untagged_idx,
+                cfg,
             )
 
             if name_changed or membership_changed:
@@ -79,3 +81,17 @@ def _port_names_to_indices(names: set[str]) -> set[int]:
         if len(parts) == 2 and parts[1].isdigit():
             indices.add(int(parts[1]) - 1)
     return indices
+
+
+def _membership_changed(
+    current_tagged: set[int],
+    current_untagged: set[int],
+    cfg: VlanConfig,
+) -> bool:
+    """Return whether *cfg* changes this VLAN's own membership dimension."""
+    new_tagged, new_untagged = apply_vlan_membership_config(
+        current_tagged,
+        current_untagged,
+        cfg,
+    )
+    return new_tagged != current_tagged or new_untagged != current_untagged

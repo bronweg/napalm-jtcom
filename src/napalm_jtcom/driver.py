@@ -24,6 +24,14 @@ from napalm_jtcom.utils.normalize import normalize_device_config
 from napalm_jtcom.utils.port_diff import plan_port_changes
 from napalm_jtcom.utils.render import render_diff
 from napalm_jtcom.utils.vlan_diff import plan_vlan_changes
+from napalm_jtcom.utils.vlan_membership import (
+    PortMembershipMap,
+    VlanMembershipPlan,
+    build_current_per_port_from_vlans,
+    diff_membership_maps,
+    plan_vlan_membership_changes,
+    serialize_membership_map,
+)
 from napalm_jtcom.vendor.jtcom.endpoints import (
     DEVICE_INFO,
     PORT_SETTINGS,
@@ -77,6 +85,9 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             )
         )
         self._session: JTComSession | None = None
+        self._allow_port_mode_change: bool = bool(
+            self.optional_args.get("allow_port_mode_change", False)
+        )
 
         logger.debug(
             "JTComDriver initialised: host=%s port=%d user=%s",
@@ -239,6 +250,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         desired_vlans: dict[int, VlanConfig],
         *,
         dry_run: bool = False,
+        allow_port_mode_change: bool | None = None,
     ) -> dict[str, Any]:
         """Apply an incremental VLAN change plan to the switch.
 
@@ -255,6 +267,8 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
                 representing the incremental change.
             dry_run: If ``True``, compute and return the change plan without
                 applying anything to the switch.
+            allow_port_mode_change: Override ``optional_args["allow_port_mode_change"]``
+                for this call.  ``False`` blocks access↔trunk transitions.
 
         Returns:
             A dict with keys:
@@ -263,6 +277,9 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             - ``"create"`` – list of VLAN IDs that were (or would be) created.
             - ``"update"`` – list of VLAN IDs that were (or would be) updated.
             - ``"delete"`` – list of VLAN IDs that were (or would be) deleted.
+            - ``"warnings"`` – mode-change warnings emitted during check mode.
+            - ``"changed_ports"`` – 0-based ports with membership changes.
+            - ``"changed_vlans"`` – VLAN IDs touched by membership changes.
 
         Raises:
             JTComError: If the session is not open.
@@ -271,19 +288,33 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         session = self._require_session()
 
         # --- Fetch current state ---
-        vlan_map = self._fetch_vlan_state(session)
+        vlan_map, current_ports = self._read_current_state(session)
 
         # --- Plan changes ---
         change_set = plan_vlan_changes(vlan_map, desired_vlans)
+        membership_plan = self._plan_vlan_membership(
+            vlan_map,
+            current_ports,
+            desired_vlans,
+            check_mode=dry_run,
+            allow_port_mode_change=allow_port_mode_change,
+        )
 
         result: dict[str, Any] = {
             "backup_file": "",
             "create": [c.vlan_id for c in change_set.create],
             "update": [u.vlan_id for u in change_set.update],
             "delete": change_set.delete,
+            "warnings": membership_plan.warnings,
+            "changed_ports": membership_plan.changed_ports,
+            "changed_vlans": membership_plan.changed_vlans,
         }
 
         if dry_run:
+            result.update(
+                before=serialize_membership_map(membership_plan.current_per_port),
+                after=serialize_membership_map(membership_plan.desired_per_port),
+            )
             return result
 
         # --- Backup before change ---
@@ -297,34 +328,24 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
 
         # --- Apply updates (ascending VID) ---
         for cfg in change_set.update:
-            vlan_create(session, cfg.vlan_id, cfg.name)
-            logger.info("Updated VLAN %d (%s)", cfg.vlan_id, cfg.name)
+            current_entry = vlan_map.get(cfg.vlan_id)
+            if (
+                cfg.name is not None
+                and current_entry is not None
+                and cfg.name != current_entry.name
+            ):
+                vlan_create(session, cfg.vlan_id, cfg.name)
+                logger.info("Updated VLAN %d (%s)", cfg.vlan_id, cfg.name)
 
-        # --- Apply membership changes ---
-        for cfg in change_set.create + change_set.update:
-            if cfg.untagged_ports:
-                vlan_set_port(
-                    session,
-                    port_ids=cfg.untagged_ports,
-                    vlan_type="access",
-                    access_vlan=cfg.vlan_id,
-                    native_vlan=None,
-                    permit_vlans=[],
-                )
-            if cfg.tagged_ports:
-                vlan_set_port(
-                    session,
-                    port_ids=cfg.tagged_ports,
-                    vlan_type="trunk",
-                    access_vlan=None,
-                    native_vlan=1,
-                    permit_vlans=[cfg.vlan_id],
-                )
+        # --- Apply membership changes using full per-port desired state ---
+        self._apply_vlan_membership_plan(session, membership_plan)
 
         # --- Apply deletes (descending VID) ---
         if change_set.delete:
             vlan_delete(session, sorted(change_set.delete, reverse=True))
             logger.info("Deleted VLANs %s", sorted(change_set.delete, reverse=True))
+
+        self._verify_vlan_membership(session, membership_plan)
 
         return result
 
@@ -454,12 +475,45 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             safety_port_id=safety_port_id,
         )
         diff = render_diff(plan)
+        membership_plan = self._plan_vlan_membership(
+            current_vlans,
+            current_ports,
+            desired_n.vlans,
+            check_mode=check_mode,
+            allow_port_mode_change=None,
+        )
+        if membership_plan.changed_ports or membership_plan.warnings:
+            diff["vlan_membership"] = {
+                "changed_ports": membership_plan.changed_ports,
+                "changed_vlans": membership_plan.changed_vlans,
+                "warnings": membership_plan.warnings,
+                "before": serialize_membership_map(membership_plan.current_per_port),
+                "after": serialize_membership_map(membership_plan.desired_per_port),
+            }
 
-        if not plan.changes:
-            return {"changed": False, "diff": diff, "backup_file": "", "applied": []}
+        if not plan.changes and not membership_plan.changed_ports:
+            return {
+                "changed": False,
+                "diff": diff,
+                "backup_file": "",
+                "applied": [],
+                "warnings": membership_plan.warnings,
+                "changed_ports": [],
+                "changed_vlans": [],
+            }
 
         if check_mode:
-            return {"changed": True, "diff": diff, "backup_file": "", "applied": []}
+            return {
+                "changed": True,
+                "diff": diff,
+                "backup_file": "",
+                "applied": [],
+                "warnings": membership_plan.warnings,
+                "changed_ports": membership_plan.changed_ports,
+                "changed_vlans": membership_plan.changed_vlans,
+                "before": serialize_membership_map(membership_plan.current_per_port),
+                "after": serialize_membership_map(membership_plan.desired_per_port),
+            }
 
         # --- Backup before change ---
         do_backup = (
@@ -469,43 +523,42 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         )
         backup_file = self._save_backup(session) if do_backup else ""
 
-        # --- Apply changes in plan order ---
+        # --- Apply VLAN creates and renames before membership changes ---
         applied: list[str] = []
         for change in plan.changes:
-            if change.kind in ("vlan_create", "vlan_update"):
+            if change.kind == "vlan_create":
                 vid = change.details["vlan_id"]
                 vc = desired_n.vlans[vid]
                 vlan_create(session, vc.vlan_id, vc.name)
-                logger.info("%s VLAN %d (%s)", change.kind, vid, vc.name)
-                if vc.untagged_ports:
-                    vlan_set_port(
-                        session,
-                        port_ids=vc.untagged_ports,
-                        vlan_type="access",
-                        access_vlan=vc.vlan_id,
-                        native_vlan=None,
-                        permit_vlans=[],
-                    )
-                if vc.tagged_ports:
-                    vlan_set_port(
-                        session,
-                        port_ids=vc.tagged_ports,
-                        vlan_type="trunk",
-                        access_vlan=None,
-                        native_vlan=1,
-                        permit_vlans=[vc.vlan_id],
-                    )
-            elif change.kind == "vlan_delete":
+                logger.info("Created VLAN %d (%s)", vid, vc.name)
+                applied.append(change.key)
+            elif change.kind == "vlan_update" and "name" in change.details:
                 vid = change.details["vlan_id"]
-                vlan_delete(session, [vid])
-                logger.info("Deleted VLAN %d", vid)
-            elif change.kind == "port_update":
+                vc = desired_n.vlans[vid]
+                vlan_create(session, vc.vlan_id, vc.name)
+                logger.info("Updated VLAN %d (%s)", vid, vc.name)
+                applied.append(change.key)
+
+        self._apply_vlan_membership_plan(session, membership_plan)
+        applied.extend(
+            f"vlan_membership:port:{port_id}" for port_id in membership_plan.changed_ports
+        )
+
+        for change in plan.changes:
+            if change.kind == "port_update":
                 pid = change.details["port_id"]
                 desired_port = desired_n.ports[pid]
                 port_cs = PortChangeSet(update=[desired_port])
                 apply_port_changes(session, current_ports, port_cs)
                 logger.info("Updated port %d", pid)
-            applied.append(change.key)
+                applied.append(change.key)
+
+        for change in plan.changes:
+            if change.kind == "vlan_delete":
+                vid = change.details["vlan_id"]
+                vlan_delete(session, [vid])
+                logger.info("Deleted VLAN %d", vid)
+                applied.append(change.key)
 
         # --- Post-apply verification ---
         post_vlans, post_ports = self._read_current_state(session)
@@ -518,13 +571,107 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         )
         if residual_plan.changes:
             raise JTComVerificationError(remaining_diff=render_diff(residual_plan))
+        self._verify_vlan_membership(session, membership_plan)
 
         return {
             "changed": True,
             "diff": diff,
             "backup_file": backup_file,
             "applied": applied,
+            "warnings": membership_plan.warnings,
+            "changed_ports": membership_plan.changed_ports,
+            "changed_vlans": membership_plan.changed_vlans,
         }
+
+    def _plan_vlan_membership(
+        self,
+        current_vlans: dict[int, VlanEntry],
+        current_ports: list[PortSettings],
+        desired_vlans: dict[int, VlanConfig],
+        *,
+        check_mode: bool,
+        allow_port_mode_change: bool | None,
+    ) -> VlanMembershipPlan:
+        """Build a VLAN membership plan from current switch state."""
+        known_ports = [settings.port_id - 1 for settings in current_ports]
+        current_per_port = build_current_per_port_from_vlans(current_vlans, known_ports)
+        allow = (
+            self._allow_port_mode_change
+            if allow_port_mode_change is None
+            else allow_port_mode_change
+        )
+        return plan_vlan_membership_changes(
+            current_per_port,
+            desired_vlans.values(),
+            allow_port_mode_change=allow,
+            check_mode=check_mode,
+        )
+
+    def _apply_vlan_membership_plan(
+        self,
+        session: JTComSession,
+        membership_plan: VlanMembershipPlan,
+    ) -> None:
+        """Apply changed ports from a VLAN membership plan with full permit lists."""
+        for port_id in membership_plan.changed_ports:
+            intent = membership_plan.desired_port_vlan[port_id]
+            mode = str(intent["mode"])
+            native_vlan = intent["native_vlan"]
+            permit_vlans = list(intent["permit_vlans"] or [])
+
+            if mode == "trunk":
+                vlan_set_port(
+                    session,
+                    port_ids=[port_id],
+                    vlan_type="trunk",
+                    access_vlan=None,
+                    native_vlan=int(native_vlan) if native_vlan is not None else None,
+                    permit_vlans=[int(vlan_id) for vlan_id in permit_vlans],
+                )
+            elif mode == "access":
+                vlan_set_port(
+                    session,
+                    port_ids=[port_id],
+                    vlan_type="access",
+                    access_vlan=int(native_vlan) if native_vlan is not None else None,
+                    native_vlan=None,
+                    permit_vlans=[],
+                )
+            else:
+                raise ValueError(
+                    f"port_id={port_id}: desired VLAN mode 'none' cannot be applied safely; "
+                    "JTCom CGI exposes only access/trunk VLAN port modes"
+                )
+
+    def _verify_vlan_membership(
+        self,
+        session: JTComSession,
+        membership_plan: VlanMembershipPlan,
+    ) -> None:
+        """Verify changed VLAN membership ports after a real apply."""
+        if not membership_plan.changed_ports:
+            return
+        post_vlans, post_ports = self._read_current_state(session)
+        post_per_port = build_current_per_port_from_vlans(
+            post_vlans,
+            [settings.port_id - 1 for settings in post_ports],
+        )
+        expected: PortMembershipMap = {
+            port_id: membership_plan.desired_per_port[port_id]
+            for port_id in membership_plan.changed_ports
+        }
+        actual: PortMembershipMap = {
+            port_id: post_per_port.get(port_id, {"untagged_vlan": None, "tagged_vlans": set()})
+            for port_id in membership_plan.changed_ports
+        }
+        remaining_diff = diff_membership_maps(actual, expected)
+        if remaining_diff:
+            raise JTComVerificationError(
+                remaining_diff={
+                    "total_changes": len(remaining_diff),
+                    "changes": remaining_diff,
+                }
+            )
 
     def _fetch_vlan_state(self, session: JTComSession) -> dict[int, VlanEntry]:
         """Fetch static VLANs and port-based VLAN settings, merge into a map.

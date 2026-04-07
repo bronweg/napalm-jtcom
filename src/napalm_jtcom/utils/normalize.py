@@ -19,13 +19,17 @@ def normalize_vlan_config(cfg: VlanConfig) -> VlanConfig:
 
     Normalization rules:
 
-    - Deduplicate and sort ``tagged_ports`` and ``untagged_ports``.
-    - Remove any port that appears in both lists (prefer untagged over tagged).
+    - Deduplicate and sort ``tagged_ports`` and ``untagged_ports`` if they are lists.
+    - If a port appears in both lists, it is removed from ``tagged_ports`` (untagged wins).
+    - ``None`` values for port lists are preserved.
     """
-    tagged = sorted(set(cfg.tagged_ports))
-    untagged = sorted(set(cfg.untagged_ports))
-    untagged_set = set(untagged)
-    tagged = [p for p in tagged if p not in untagged_set]
+    tagged = None if cfg.tagged_ports is None else sorted(set(cfg.tagged_ports))
+    untagged = None if cfg.untagged_ports is None else sorted(set(cfg.untagged_ports))
+
+    if tagged is not None and untagged is not None:
+        untagged_set = set(untagged)
+        tagged = [p for p in tagged if p not in untagged_set]
+
     return replace(cfg, tagged_ports=tagged, untagged_ports=untagged)
 
 

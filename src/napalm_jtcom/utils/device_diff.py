@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from napalm_jtcom.model.config import DeviceConfig
+from napalm_jtcom.model.vlan import VlanConfig
+from napalm_jtcom.utils.vlan_membership import NullablePortSet, apply_vlan_membership_config
 
 ChangeKind = Literal["vlan_create", "vlan_update", "vlan_delete", "port_update"]
 
@@ -116,6 +118,11 @@ def build_device_plan(
 
         # state == "present"
         if vid not in current.vlans:
+            tagged, untagged = apply_vlan_membership_config(set(), set(), cfg)
+            if tagged is None or untagged is None:
+                raise AssertionError(
+                    f"Internal invariant violated: new VLAN {vid} membership must be concrete"
+                )
             creates.append(
                 Change(
                     kind="vlan_create",
@@ -123,8 +130,8 @@ def build_device_plan(
                     details={
                         "vlan_id": vid,
                         "name": cfg.name,
-                        "tagged_ports": list(cfg.tagged_ports),
-                        "untagged_ports": list(cfg.untagged_ports),
+                        "tagged_ports": sorted(tagged),
+                        "untagged_ports": sorted(untagged),
                     },
                 )
             )
@@ -136,16 +143,8 @@ def build_device_plan(
         if cfg.name is not None and cfg.name != entry.name:
             diffs["name"] = {"from": entry.name, "to": cfg.name}
 
-        if set(cfg.tagged_ports) != set(entry.tagged_ports):
-            diffs["tagged_ports"] = {
-                "from": sorted(entry.tagged_ports),
-                "to": sorted(cfg.tagged_ports),
-            }
-        if set(cfg.untagged_ports) != set(entry.untagged_ports):
-            diffs["untagged_ports"] = {
-                "from": sorted(entry.untagged_ports),
-                "to": sorted(cfg.untagged_ports),
-            }
+        membership_diffs = _vlan_membership_diffs(entry, cfg)
+        diffs.update(membership_diffs)
 
         if diffs:
             updates.append(
@@ -206,3 +205,63 @@ def build_device_plan(
         "vlan_delete": len(deletes),
     }
     return DevicePlan(changes=all_changes, summary=summary)
+
+
+def _vlan_membership_diffs(current: VlanConfig, desired: VlanConfig) -> dict[str, Any]:
+    """Return VLAN membership diffs while preserving omitted-field semantics."""
+    current_tagged: NullablePortSet = (
+        None if current.tagged_ports is None else set(current.tagged_ports)
+    )
+    current_untagged: NullablePortSet = (
+        None if current.untagged_ports is None else set(current.untagged_ports)
+    )
+
+    new_tagged, new_untagged = apply_vlan_membership_config(
+        current_tagged,
+        current_untagged,
+        desired,
+    )
+    membership = desired.normalized_membership()
+
+    diffs: dict[str, Any] = {}
+    tagged_diff = _membership_side_diff(
+        current_tagged,
+        new_tagged,
+        _side_touched(membership["tagged"]),
+    )
+    if tagged_diff is not None:
+        diffs["tagged_ports"] = tagged_diff
+
+    untagged_diff = _membership_side_diff(
+        current_untagged,
+        new_untagged,
+        _side_touched(membership["untagged"]),
+    )
+    if untagged_diff is not None:
+        diffs["untagged_ports"] = untagged_diff
+    return diffs
+
+
+def _membership_side_diff(
+    current: NullablePortSet,
+    new: NullablePortSet,
+    touched: bool,
+) -> dict[str, Any] | None:
+    if current == new and not (touched and current is None):
+        return None
+
+    diff: dict[str, Any] = {
+        "from": None if current is None else sorted(current),
+        "to": None if new is None else sorted(new),
+    }
+    if touched and new is None:
+        diff["note"] = "unknown current membership; add/remove target cannot be rendered fully"
+        diff["meta"] = {
+            "unknown_membership": True,
+            "reason": "unknown_current_baseline_with_add_remove",
+        }
+    return diff
+
+
+def _side_touched(operation: dict[str, set[int] | None]) -> bool:
+    return operation["set"] is not None or bool(operation["add"]) or bool(operation["remove"])
