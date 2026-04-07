@@ -55,8 +55,11 @@ options:
     description: >
       Incremental port changes, keyed by 1-based port ID (string or int).
       Each entry may contain C(admin_up) (bool), C(speed) (str),
-      and C(flow_control) (bool).  Set C(admin_up: false) to administratively
-      disable a port.  Ports not listed are untouched.
+      C(flow_control) (bool), and optional VLAN membership shortcuts:
+      C(access_vlan), C(native_vlan), C(trunk_add_vlans), C(trunk_remove_vlans),
+      and C(trunk_set_vlans).  Port-centric VLAN input is translated to
+      canonical VLAN-centric operations before planning.  Set C(admin_up: false)
+      to administratively disable a port.  Ports not listed are untouched.
       Port 6 (management uplink) cannot be administratively disabled.
     type: dict
 notes:
@@ -104,8 +107,12 @@ EXAMPLES = r"""
         admin_up: true
         speed: Auto
         flow_control: false
+        access_vlan: 10
       3:
         admin_up: false
+      8:
+        native_vlan: 10
+        trunk_set_vlans: [20, 30]
 """
 
 RETURN = r"""

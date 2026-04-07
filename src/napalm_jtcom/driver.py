@@ -22,6 +22,7 @@ from napalm_jtcom.parser.vlan import parse_port_vlan_settings, parse_static_vlan
 from napalm_jtcom.utils.device_diff import build_device_plan
 from napalm_jtcom.utils.normalize import normalize_device_config
 from napalm_jtcom.utils.port_diff import plan_port_changes
+from napalm_jtcom.utils.port_vlan_input import merge_port_vlan_membership_inputs
 from napalm_jtcom.utils.render import render_diff
 from napalm_jtcom.utils.vlan_diff import plan_vlan_changes
 from napalm_jtcom.utils.vlan_membership import (
@@ -467,18 +468,32 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         current_cfg = DeviceConfig.from_current(current_vlans, current_ports)
         current_n = normalize_device_config(current_cfg)
         desired_n = normalize_device_config(desired)
+        current_per_port = build_current_per_port_from_vlans(
+            current_vlans,
+            [settings.port_id - 1 for settings in current_ports],
+        )
+        merged_desired_vlans = merge_port_vlan_membership_inputs(
+            current_per_port,
+            desired_n.vlans,
+            desired_n.ports,
+        )
+        desired_plan_n = DeviceConfig(
+            vlans=merged_desired_vlans,
+            ports=desired_n.ports,
+            metadata=dict(desired_n.metadata),
+        )
 
         # --- Build plan ---
         plan = build_device_plan(
             current_n,
-            desired_n,
+            desired_plan_n,
             safety_port_id=safety_port_id,
         )
         diff = render_diff(plan)
         membership_plan = self._plan_vlan_membership(
             current_vlans,
             current_ports,
-            desired_n.vlans,
+            desired_plan_n.vlans,
             check_mode=check_mode,
             allow_port_mode_change=None,
         )
@@ -528,13 +543,13 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         for change in plan.changes:
             if change.kind == "vlan_create":
                 vid = change.details["vlan_id"]
-                vc = desired_n.vlans[vid]
+                vc = desired_plan_n.vlans[vid]
                 vlan_create(session, vc.vlan_id, vc.name)
                 logger.info("Created VLAN %d (%s)", vid, vc.name)
                 applied.append(change.key)
             elif change.kind == "vlan_update" and "name" in change.details:
                 vid = change.details["vlan_id"]
-                vc = desired_n.vlans[vid]
+                vc = desired_plan_n.vlans[vid]
                 vlan_create(session, vc.vlan_id, vc.name)
                 logger.info("Updated VLAN %d (%s)", vid, vc.name)
                 applied.append(change.key)
@@ -566,7 +581,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         post_n = normalize_device_config(post_cfg)
         residual_plan = build_device_plan(
             post_n,
-            desired_n,
+            desired_plan_n,
             safety_port_id=safety_port_id,
         )
         if residual_plan.changes:

@@ -240,6 +240,9 @@ def test_action_plugin_int_list_helper_preserves_missing_none_and_empty_list(
     assert module._int_list_or_none({"tagged_ports": None}, "tagged_ports") is None
     assert module._int_list_or_none({"tagged_ports": []}, "tagged_ports") == []
     assert module._int_list_or_none({"tagged_ports": ["1"]}, "tagged_ports") == [1]
+    assert module._int_or_none({}, "access_vlan") is None
+    assert module._int_or_none({"access_vlan": None}, "access_vlan") is None
+    assert module._int_or_none({"access_vlan": "10"}, "access_vlan") == 10
 
 
 def _load_action_plugin_module(path: pathlib.Path) -> types.ModuleType:

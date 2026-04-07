@@ -43,14 +43,36 @@ def normalize_port_config(cfg: PortConfig) -> PortConfig:
     - Unknown tokens are left unchanged.
     - ``None`` speed_duplex is left unchanged.
     """
-    if cfg.speed_duplex is None:
-        return cfg
-    if cfg.speed_duplex in SPEED_DUPLEX_CANONICAL:
-        return cfg
-    canonical = SPEED_DUPLEX_ALIASES.get(cfg.speed_duplex.lower())
+    trunk_add = _normalize_optional_int_list(cfg.trunk_add_vlans)
+    trunk_remove = _normalize_optional_int_list(cfg.trunk_remove_vlans)
+    trunk_set = _normalize_optional_int_list(cfg.trunk_set_vlans)
+    normalized = cfg
+    if (
+        trunk_add != cfg.trunk_add_vlans
+        or trunk_remove != cfg.trunk_remove_vlans
+        or trunk_set != cfg.trunk_set_vlans
+    ):
+        normalized = replace(
+            cfg,
+            trunk_add_vlans=trunk_add,
+            trunk_remove_vlans=trunk_remove,
+            trunk_set_vlans=trunk_set,
+        )
+
+    if normalized.speed_duplex is None:
+        return normalized
+    if normalized.speed_duplex in SPEED_DUPLEX_CANONICAL:
+        return normalized
+    canonical = SPEED_DUPLEX_ALIASES.get(normalized.speed_duplex.lower())
     if canonical is not None:
-        return replace(cfg, speed_duplex=canonical)
-    return cfg
+        return replace(normalized, speed_duplex=canonical)
+    return normalized
+
+
+def _normalize_optional_int_list(values: list[int] | None) -> list[int] | None:
+    if values is None:
+        return None
+    return sorted(set(values))
 
 
 def normalize_device_config(cfg: DeviceConfig) -> DeviceConfig:

@@ -5,6 +5,25 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+def _validate_vlan_id(vlan_id: int | None, field_name: str) -> None:
+    """Validate an optional 802.1Q VLAN ID."""
+    if vlan_id is None:
+        return
+    if not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
+        raise ValueError(f"{field_name} must be 1-4094, got {vlan_id}")
+
+
+def _validate_vlan_list(vlan_list: list[int] | None, field_name: str) -> None:
+    """Validate an optional list of 802.1Q VLAN IDs."""
+    if vlan_list is None:
+        return
+    for vlan_id in vlan_list:
+        if not isinstance(vlan_id, int) or not 1 <= vlan_id <= 4094:
+            raise ValueError(
+                f"Invalid VLAN '{vlan_id}' in '{field_name}'. VLAN IDs must be 1-4094."
+            )
+
+
 @dataclass
 class PortSettings:
     """Administrative configuration for a single switch port.
@@ -63,16 +82,39 @@ class PortConfig:
             (e.g. ``"Auto"``, ``"1000M/Full"``), or ``None`` to leave unchanged.
         flow_control: ``True`` to enable flow control, ``False`` to disable,
             ``None`` to leave unchanged.
+        access_vlan: Assign this port as untagged member of the VLAN. This is
+            translated to VLAN-centric ``untagged_add`` by the merge layer.
+        native_vlan: Assign this port's trunk native VLAN. This is translated
+            to VLAN-centric ``untagged_add`` by the merge layer.
+        trunk_add_vlans: Add this port as tagged member of these VLANs.
+        trunk_remove_vlans: Remove this port from tagged membership of these VLANs.
+        trunk_set_vlans: Set this port's tagged VLAN membership to exactly these VLANs.
     """
 
     port_id: int
     admin_up: bool | None = None
     speed_duplex: str | None = None
     flow_control: bool | None = None
+    access_vlan: int | None = None
+    native_vlan: int | None = None
+    trunk_add_vlans: list[int] | None = None
+    trunk_remove_vlans: list[int] | None = None
+    trunk_set_vlans: list[int] | None = None
 
     def __post_init__(self) -> None:
         if self.port_id < 1:
             raise ValueError(f"port_id must be >= 1, got {self.port_id}")
+        _validate_vlan_id(self.access_vlan, "access_vlan")
+        _validate_vlan_id(self.native_vlan, "native_vlan")
+        _validate_vlan_list(self.trunk_add_vlans, "trunk_add_vlans")
+        _validate_vlan_list(self.trunk_remove_vlans, "trunk_remove_vlans")
+        _validate_vlan_list(self.trunk_set_vlans, "trunk_set_vlans")
+        if self.trunk_set_vlans is not None and (
+            self.trunk_add_vlans is not None or self.trunk_remove_vlans is not None
+        ):
+            raise ValueError(
+                "trunk_set_vlans cannot be combined with trunk_add_vlans or trunk_remove_vlans"
+            )
 
 
 @dataclass
@@ -85,4 +127,3 @@ class PortChangeSet:
     """
 
     update: list[PortConfig] = field(default_factory=list)
-
