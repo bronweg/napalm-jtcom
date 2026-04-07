@@ -10,6 +10,8 @@ from __future__ import annotations
 LOGIN: str = "/login.cgi"
 
 SYSCMD: str = "/syscmd.cgi"
+# JTCom logout is performed via syscmd.cgi
+LOGOUT: str = SYSCMD
 
 # Device / system
 DEVICE_INFO: str = "/info.cgi"
