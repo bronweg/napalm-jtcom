@@ -163,7 +163,7 @@ def test_driver_apply_sends_full_permit_list_for_changed_port_only() -> None:
     endpoint = session.post.call_args.args[0]
     payload = session.post.call_args.kwargs["data"]
     assert endpoint == "/vlanport.cgi"
-    assert payload["PortId"] == "5"
+    assert payload["PortId"] == "4"
     assert payload["VlanType"] == "1"
     assert payload["NativeVlan"] == "10"
     assert payload["PermitVlan"] == "10_20_30"
@@ -175,7 +175,7 @@ def test_build_current_rejects_port_untagged_in_multiple_vlans() -> None:
         20: VlanEntry(vlan_id=20, name="v20", untagged_ports=["Port 1"]),
     }
     with pytest.raises(ValueError, match="Impossible VLAN state"):
-        build_current_per_port_from_vlans(current_vlans, known_ports=[0])
+        build_current_per_port_from_vlans(current_vlans, known_ports=[1])
 
 
 def test_check_mode_warns_instead_of_failing_on_desired_mode_none() -> None:
@@ -218,7 +218,7 @@ def test_set_vlans_mode_none_failure_happens_before_device_mutation(
     )
 
     with pytest.raises(VlanMembershipUnsupportedModeError):
-        driver.set_vlans({20: VlanConfig(vlan_id=20, untagged_remove=[3])})
+        driver.set_vlans({20: VlanConfig(vlan_id=20, untagged_remove=[4])})
 
     session.post.assert_not_called()
     session.download_config_backup.assert_not_called()

@@ -169,7 +169,7 @@ class TestVlanSetPort:
             content_type="application/json",
         )
         session = _mock_session()
-        vlan_set_port(session, port_ids=[0], vlan_type="access",
+        vlan_set_port(session, port_ids=[1], vlan_type="access",
                       access_vlan=10, native_vlan=None, permit_vlans=[])
 
         req = responses_lib.calls[0].request
@@ -190,7 +190,7 @@ class TestVlanSetPort:
             content_type="application/json",
         )
         session = _mock_session()
-        vlan_set_port(session, port_ids=[0, 1], vlan_type="trunk",
+        vlan_set_port(session, port_ids=[1, 2], vlan_type="trunk",
                       access_vlan=None, native_vlan=1, permit_vlans=[10])
 
         req = responses_lib.calls[0].request
@@ -209,7 +209,7 @@ class TestVlanSetPort:
             content_type="application/json",
         )
         session = _mock_session()
-        vlan_set_port(session, port_ids=[2], vlan_type="trunk",
+        vlan_set_port(session, port_ids=[3], vlan_type="trunk",
                       access_vlan=None, native_vlan=1, permit_vlans=[10, 20, 30])
 
         req = responses_lib.calls[0].request
@@ -224,7 +224,12 @@ class TestVlanSetPort:
     def test_invalid_vlan_type_raises_value_error(self) -> None:
         session = _mock_session()
         with pytest.raises(ValueError, match="vlan_type"):
-            vlan_set_port(session, [0], "hybrid", 1, None, [])
+            vlan_set_port(session, [1], "hybrid", 1, None, [])
+
+    def test_port_zero_raises_value_error(self) -> None:
+        session = _mock_session()
+        with pytest.raises(ValueError, match="1-based positive integers"):
+            vlan_set_port(session, [0], "access", 1, None, [])
 
     @responses_lib.activate
     def test_case_insensitive_vlan_type(self) -> None:
@@ -236,7 +241,7 @@ class TestVlanSetPort:
         )
         session = _mock_session()
         # "TRUNK" should work same as "trunk"
-        vlan_set_port(session, [0], "TRUNK", None, 1, [10])
+        vlan_set_port(session, [1], "TRUNK", None, 1, [10])
         req = responses_lib.calls[0].request
         body = req.body or ""
         assert "VlanType=1" in body

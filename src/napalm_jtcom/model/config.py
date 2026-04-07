@@ -34,8 +34,8 @@ class DeviceConfig:
         """Build a :class:`DeviceConfig` from the switch current state.
 
         Converts :class:`~napalm_jtcom.model.vlan.VlanEntry` port name strings
-        (``"Port N"``) to 0-based integer indices used by
-        :class:`~napalm_jtcom.model.vlan.VlanConfig`.
+        (``"Port N"``) to the same 1-based port IDs used everywhere in the
+        project, including :class:`~napalm_jtcom.model.vlan.VlanConfig`.
 
         Args:
             current_vlans: VLAN ID to :class:`VlanEntry` mapping from the parser.
@@ -48,16 +48,16 @@ class DeviceConfig:
         for vid, entry in current_vlans.items():
             tagged: list[int] = []
             for name in entry.tagged_ports:
-                idx = _port_name_to_index(name)
-                if idx is not None:
-                    tagged.append(idx)
+                port_id = _port_name_to_id(name)
+                if port_id is not None:
+                    tagged.append(port_id)
                 else:
                     logger.warning("Skipping unparseable tagged port name %r in VLAN %d", name, vid)
             untagged: list[int] = []
             for name in entry.untagged_ports:
-                idx = _port_name_to_index(name)
-                if idx is not None:
-                    untagged.append(idx)
+                port_id = _port_name_to_id(name)
+                if port_id is not None:
+                    untagged.append(port_id)
                 else:
                     logger.warning(
                         "Skipping unparseable untagged port name %r in VLAN %d", name, vid
@@ -81,9 +81,9 @@ class DeviceConfig:
         return cls(vlans=vlans, ports=ports)
 
 
-def _port_name_to_index(name: str) -> int | None:
-    """Convert ``"Port N"`` to a 0-based integer index, or ``None`` if unparseable."""
+def _port_name_to_id(name: str) -> int | None:
+    """Convert ``"Port N"`` to its 1-based port ID, or ``None`` if unparseable."""
     parts = name.rsplit(" ", 1)
     if len(parts) == 2 and parts[1].isdigit():
-        return int(parts[1]) - 1
+        return int(parts[1])
     return None

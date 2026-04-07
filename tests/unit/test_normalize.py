@@ -23,9 +23,9 @@ def test_normalize_vlan_sorts_tagged() -> None:
 
 
 def test_normalize_vlan_sorts_untagged() -> None:
-    cfg = VlanConfig(vlan_id=10, untagged_ports=[5, 2, 0])
+    cfg = VlanConfig(vlan_id=10, untagged_ports=[5, 2, 1])
     result = normalize_vlan_config(cfg)
-    assert result.untagged_ports == [0, 2, 5]
+    assert result.untagged_ports == [1, 2, 5]
 
 
 def test_normalize_vlan_deduplicates_tagged() -> None:

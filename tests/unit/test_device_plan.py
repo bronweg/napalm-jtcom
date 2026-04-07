@@ -66,7 +66,7 @@ def test_no_changes_empty_configs() -> None:
 
 
 def test_no_changes_identical_vlan() -> None:
-    cfg = _cfg(vlans={10: _vlan(10, "data", untagged=[0, 1])})
+    cfg = _cfg(vlans={10: _vlan(10, "data", untagged=[1, 2])})
     plan = build_device_plan(cfg, cfg)
     assert plan.changes == []
 
@@ -127,8 +127,8 @@ def test_vlan_update_name_change() -> None:
 
 
 def test_vlan_update_membership_change() -> None:
-    cur = _cfg(vlans={10: _vlan(10, untagged=[0])})
-    des = _cfg(vlans={10: _vlan(10, untagged=[0, 1])})
+    cur = _cfg(vlans={10: _vlan(10, untagged=[1])})
+    des = _cfg(vlans={10: _vlan(10, untagged=[1, 2])})
     plan = build_device_plan(cur, des)
     assert len(plan.changes) == 1
     assert plan.changes[0].kind == "vlan_update"

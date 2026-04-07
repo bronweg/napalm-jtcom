@@ -26,9 +26,9 @@ class TestVlanConfigMembershipModel:
         assert normalized["tagged"]["remove"] == set()
 
     def test_legacy_untagged_ports_becomes_untagged_set(self) -> None:
-        vlan = VlanConfig(vlan_id=20, untagged_ports=[0, 0, 1])
+        vlan = VlanConfig(vlan_id=20, untagged_ports=[1, 1, 2])
         normalized = vlan.normalized_membership()
-        assert normalized["untagged"]["set"] == {0, 1}
+        assert normalized["untagged"]["set"] == {1, 2}
         assert normalized["untagged"]["add"] == set()
         assert normalized["untagged"]["remove"] == set()
         assert normalized["tagged"]["set"] is None
@@ -71,9 +71,9 @@ class TestVlanConfigMembershipModel:
         assert normalized["tagged"]["set"] == set()
 
     def test_untagged_add_only(self) -> None:
-        vlan = VlanConfig(vlan_id=20, untagged_add=[0])
+        vlan = VlanConfig(vlan_id=20, untagged_add=[1])
         normalized = vlan.normalized_membership()
-        assert normalized["untagged"]["add"] == {0}
+        assert normalized["untagged"]["add"] == {1}
         assert normalized["untagged"]["remove"] == set()
         assert normalized["untagged"]["set"] is None
 
@@ -174,8 +174,25 @@ class TestVlanConfigMembershipModel:
         ],
     )
     def test_invalid_port_types_or_values(self, kwargs: dict) -> None:
-        with pytest.raises(ValueError, match="Ports must be non-negative integers"):
+        with pytest.raises(ValueError, match="1-based positive integers"):
             VlanConfig(vlan_id=20, **kwargs)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            dict(tagged_add=[0]),
+            dict(untagged_set=[0]),
+        ],
+    )
+    def test_port_zero_is_invalid(self, kwargs: dict) -> None:
+        with pytest.raises(ValueError, match="1-based positive integers"):
+            VlanConfig(vlan_id=20, **kwargs)
+
+    def test_port_one_is_valid(self) -> None:
+        vlan = VlanConfig(vlan_id=20, tagged_add=[1], untagged_remove=[1])
+        normalized = vlan.normalized_membership()
+        assert normalized["tagged"]["add"] == {1}
+        assert normalized["untagged"]["remove"] == {1}
 
     # ==============================================================================
     # E. VLAN/state validation

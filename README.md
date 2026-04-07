@@ -60,6 +60,8 @@ list are affected. Unlisted items are always left untouched.
 
 - VLANs carry a `state` field: `present` (default) or `absent`.
 - Port entries are patch-only — supply only the fields you want to change.
+- Port numbering is 1-based across the entire project: switch `Port 5`,
+  `PortConfig(port_id=5)`, and VLAN membership port `5` all refer to the same port.
 - VLAN 1 is protected and can never be deleted.
 - Port 6 (management uplink) can never be administratively disabled.
 
@@ -79,7 +81,7 @@ driver.open()
 result = driver.apply_device_config(
     DeviceConfig(
         vlans={
-            10: VlanConfig(vlan_id=10, name="Management", untagged_ports=[0], state="present"),
+            10: VlanConfig(vlan_id=10, name="Management", untagged_ports=[1], state="present"),
             99: VlanConfig(vlan_id=99, state="absent"),   # delete VLAN 99 if it exists
         },
         ports={
@@ -163,7 +165,7 @@ pip install napalm-jtcom
     vlans:
       10:
         name: Management
-        untagged_ports: [0]
+        untagged_ports: [1]
       20:
         name: Data
         tagged_ports: [7]

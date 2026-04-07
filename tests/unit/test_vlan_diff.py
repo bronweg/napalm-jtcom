@@ -124,14 +124,14 @@ class TestUpdateName:
 class TestUpdateMembership:
     def test_membership_change_detected(self) -> None:
         current = {10: make_entry(10, untagged_ports=["Port 1"])}
-        # desired: port 0 (Port 1 = index 0) — no change; port 1 (Port 2) added
-        desired = {10: make_cfg(10, untagged_ports=[0, 1])}
+        # desired: Port 1 unchanged, Port 2 added.
+        desired = {10: make_cfg(10, untagged_ports=[1, 2])}
         cs = plan_vlan_changes(current, desired)
         assert [u.vlan_id for u in cs.update] == [10]
 
     def test_membership_same_not_flagged(self) -> None:
         current = {10: make_entry(10, untagged_ports=["Port 1"])}
-        desired = {10: make_cfg(10, untagged_ports=[0])}  # Port 1 = index 0
+        desired = {10: make_cfg(10, untagged_ports=[1])}
         cs = plan_vlan_changes(current, desired)
         assert cs.update == []
 
@@ -142,13 +142,13 @@ class TestUpdateMembership:
                 tagged_ports=["Port 11", "Port 21", "Port 31"],
             )
         }
-        desired = {10: make_cfg(10, tagged_remove=[20])}
+        desired = {10: make_cfg(10, tagged_remove=[21])}
         cs = plan_vlan_changes(current, desired)
         assert [u.vlan_id for u in cs.update] == [10]
 
     def test_tagged_add_remove_detected(self) -> None:
         current = {10: make_entry(10, tagged_ports=["Port 11", "Port 21"])}
-        desired = {10: make_cfg(10, tagged_add=[30], tagged_remove=[10])}
+        desired = {10: make_cfg(10, tagged_add=[31], tagged_remove=[11])}
         cs = plan_vlan_changes(current, desired)
         assert [u.vlan_id for u in cs.update] == [10]
 

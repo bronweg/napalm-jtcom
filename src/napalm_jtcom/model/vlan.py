@@ -11,9 +11,9 @@ def _validate_port_list(port_list: list[int] | None, field_name: str) -> None:
     if port_list is None:
         return
     for port in port_list:
-        if not isinstance(port, int) or port < 0:
+        if not isinstance(port, int) or port < 1:
             raise ValueError(
-                f"Invalid port '{port}' in '{field_name}'. Ports must be non-negative integers."
+                f"Invalid port '{port}' in '{field_name}'. Ports must be 1-based positive integers."
             )
 
 
@@ -87,15 +87,15 @@ class VlanConfig:
         name: Human-readable VLAN name; ``None`` means "do not change".
         state: ``"present"`` to create/update this VLAN; ``"absent"`` to delete it.
 
-        tagged_ports: (Legacy) Replace tagged ports with this list of 0-based indices.
-        untagged_ports: (Legacy) Replace untagged ports with this list of 0-based indices.
+        tagged_ports: (Legacy) Replace tagged ports with this list of 1-based port IDs.
+        untagged_ports: (Legacy) Replace untagged ports with this list of 1-based port IDs.
 
-        tagged_add: Add these port indices to tagged membership.
-        tagged_remove: Remove these port indices from tagged membership.
-        tagged_set: Explicitly set tagged membership to these port indices.
-        untagged_add: Add these port indices to untagged membership.
-        untagged_remove: Remove these port indices from untagged membership.
-        untagged_set: Explicitly set untagged membership to these port indices.
+        tagged_add: Add these 1-based port IDs to tagged membership.
+        tagged_remove: Remove these 1-based port IDs from tagged membership.
+        tagged_set: Explicitly set tagged membership to these 1-based port IDs.
+        untagged_add: Add these 1-based port IDs to untagged membership.
+        untagged_remove: Remove these 1-based port IDs from untagged membership.
+        untagged_set: Explicitly set untagged membership to these 1-based port IDs.
     """
 
     vlan_id: int
@@ -149,7 +149,8 @@ class VlanConfig:
             or self.tagged_set is not None
         ):
             raise ValueError(
-                "legacy tagged_ports cannot be combined with tagged_add, tagged_remove, or tagged_set"
+                "legacy tagged_ports cannot be combined with tagged_add, "
+                "tagged_remove, or tagged_set"
             )
 
         # Conflict validation for untagged fields
@@ -163,7 +164,8 @@ class VlanConfig:
             or self.untagged_set is not None
         ):
             raise ValueError(
-                "legacy untagged_ports cannot be combined with untagged_add, untagged_remove, or untagged_set"
+                "legacy untagged_ports cannot be combined with untagged_add, "
+                "untagged_remove, or untagged_set"
             )
 
     def normalized_membership(self) -> dict[str, dict[str, set[int] | None]]:
@@ -182,7 +184,7 @@ class VlanConfig:
             'add', 'remove', and 'set' operations as sets of port indices.
             'set' can be None if no replacement is requested.
         """
-        normalized = {
+        normalized: dict[str, dict[str, set[int] | None]] = {
             "tagged": {"add": set(), "remove": set(), "set": None},
             "untagged": {"add": set(), "remove": set(), "set": None},
         }

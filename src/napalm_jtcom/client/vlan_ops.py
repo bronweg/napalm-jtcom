@@ -105,12 +105,13 @@ def vlan_set_port(
 ) -> None:
     """Set VLAN membership for one or more ports.
 
-    The switch accepts multiple ports in a single POST by joining 0-based
-    port indices with underscores (``PortId=0_1_2``).
+    The public helper accepts 1-based port IDs like the rest of the project.
+    The JTCom CGI payload uses 0-based port values; conversion is intentionally
+    localized here at the vendor transport boundary.
 
     Args:
         session: Active authenticated session.
-        port_ids: 0-based port indices (Port 1 = 0, Port 2 = 1, …).
+        port_ids: 1-based port IDs.
         vlan_type: ``"access"`` or ``"trunk"`` (case-insensitive).
         access_vlan: VLAN ID for Access mode (ignored in Trunk mode).
         native_vlan: Native VLAN ID for Trunk mode (ignored in Access mode).
@@ -122,11 +123,13 @@ def vlan_set_port(
     """
     if not port_ids:
         raise ValueError("port_ids must not be empty")
+    if any(port_id < 1 for port_id in port_ids):
+        raise ValueError(f"port_ids must be 1-based positive integers, got {port_ids!r}")
     vt_lower = vlan_type.lower()
     if vt_lower not in {"access", "trunk"}:
         raise ValueError(f"vlan_type must be 'access' or 'trunk', got {vlan_type!r}")
 
-    port_id_str = "_".join(str(p) for p in sorted(port_ids))
+    port_id_str = "_".join(str(p - 1) for p in sorted(port_ids))
 
     if vt_lower == "access":
         vlan_type_val = _VLAN_TYPE_ACCESS
@@ -153,4 +156,3 @@ def vlan_set_port(
             "PermitVlan": pv,
         },
     )
-

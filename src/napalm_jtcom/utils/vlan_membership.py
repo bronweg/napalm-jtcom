@@ -1,8 +1,7 @@
 """VLAN membership apply engine.
 
 This module keeps the runtime VLAN membership logic independent from the CGI
-write path.  It works with 0-based port IDs because that is the convention used
-by JTCom VLAN payloads and :class:`napalm_jtcom.model.vlan.VlanConfig`.
+write path.  Port IDs are 1-based everywhere in the domain model and planner.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ NullablePortSet = set[int] | None
 
 
 class PortVlanIntent(TypedDict):
-    """Full device-level VLAN intent for one 0-based port."""
+    """Full device-level VLAN intent for one 1-based port."""
 
     mode: PortMode
     native_vlan: int | None
@@ -94,7 +93,7 @@ def build_current_per_port_from_vlans(
 
     Args:
         vlans: Current VLAN entries, including tagged/untagged port names.
-        known_ports: Known 0-based port IDs.  Every listed port is initialized
+        known_ports: Known 1-based port IDs.  Every listed port is initialized
             even if it has no membership in *vlans*.
 
     Raises:
@@ -105,7 +104,7 @@ def build_current_per_port_from_vlans(
 
     for vlan_id, entry in sorted(vlans.items()):
         for port_name in entry.untagged_ports:
-            port_id = _port_name_to_index(port_name)
+            port_id = _port_name_to_id(port_name)
             if port_id is None:
                 raise ValueError(
                     f"Cannot parse untagged port name {port_name!r} in VLAN {vlan_id}"
@@ -121,7 +120,7 @@ def build_current_per_port_from_vlans(
             state["untagged_vlan"] = vlan_id
 
         for port_name in entry.tagged_ports:
-            port_id = _port_name_to_index(port_name)
+            port_id = _port_name_to_id(port_name)
             if port_id is None:
                 raise ValueError(f"Cannot parse tagged port name {port_name!r} in VLAN {vlan_id}")
             current.setdefault(port_id, make_port_state())
@@ -274,7 +273,7 @@ def changed_ports(
     current_per_port: PortMembershipMap,
     desired_per_port: PortMembershipMap,
 ) -> list[int]:
-    """Return 0-based ports whose membership changed."""
+    """Return 1-based ports whose membership changed."""
     ports: list[int] = []
     for port_id in sorted(set(current_per_port) | set(desired_per_port)):
         if not _same_state(
@@ -445,8 +444,9 @@ def _tagged_vlans(state: PortMembershipState) -> set[int]:
     return value
 
 
-def _port_name_to_index(name: str) -> int | None:
+def _port_name_to_id(name: str) -> int | None:
+    """Convert ``"Port N"`` to its 1-based port ID."""
     parts = name.rsplit(" ", 1)
     if len(parts) == 2 and parts[1].isdigit():
-        return int(parts[1]) - 1
+        return int(parts[1])
     return None
