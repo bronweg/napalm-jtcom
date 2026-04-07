@@ -66,6 +66,11 @@ class ActionModule(ActionBase):  # type: ignore[misc]
                 admin_up=entry.get("admin_up"),
                 speed_duplex=entry.get("speed"),
                 flow_control=entry.get("flow_control"),
+                access_vlan=_int_or_none(entry, "access_vlan"),
+                native_vlan=_int_or_none(entry, "native_vlan"),
+                trunk_add_vlans=_int_list_or_none(entry, "trunk_add_vlans"),
+                trunk_remove_vlans=_int_list_or_none(entry, "trunk_remove_vlans"),
+                trunk_set_vlans=_int_list_or_none(entry, "trunk_set_vlans"),
             )
 
         desired = DeviceConfig(vlans=vlans, ports=ports)
@@ -111,3 +116,9 @@ def _int_list_or_none(entry: dict[str, Any], key: str) -> list[int] | None:
     if key not in entry or entry[key] is None:
         return None
     return [int(x) for x in entry[key]]
+
+
+def _int_or_none(entry: dict[str, Any], key: str) -> int | None:
+    if key not in entry or entry[key] is None:
+        return None
+    return int(entry[key])
