@@ -59,11 +59,11 @@ def plan_vlan_changes(
             entry = current[vid]
             name_changed = cfg.name is not None and cfg.name != entry.name
 
-            current_untagged_idx = _port_names_to_indices(set(entry.untagged_ports))
-            current_tagged_idx = _port_names_to_indices(set(entry.tagged_ports))
+            current_untagged_ids = _port_names_to_ids(set(entry.untagged_ports))
+            current_tagged_ids = _port_names_to_ids(set(entry.tagged_ports))
             membership_changed = _membership_changed(
-                current_tagged_idx,
-                current_untagged_idx,
+                current_tagged_ids,
+                current_untagged_ids,
                 cfg,
             )
 
@@ -73,14 +73,14 @@ def plan_vlan_changes(
     return VlanChangeSet(create=creates, update=updates, delete=deletes)
 
 
-def _port_names_to_indices(names: set[str]) -> set[int]:
-    """Convert a set of ``"Port N"`` strings to 0-based integer indices."""
-    indices: set[int] = set()
+def _port_names_to_ids(names: set[str]) -> set[int]:
+    """Convert a set of ``"Port N"`` strings to 1-based port IDs."""
+    port_ids: set[int] = set()
     for name in names:
         parts = name.rsplit(" ", 1)
         if len(parts) == 2 and parts[1].isdigit():
-            indices.add(int(parts[1]) - 1)
-    return indices
+            port_ids.add(int(parts[1]))
+    return port_ids
 
 
 def _membership_changed(

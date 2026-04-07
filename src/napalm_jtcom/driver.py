@@ -279,7 +279,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             - ``"update"`` – list of VLAN IDs that were (or would be) updated.
             - ``"delete"`` – list of VLAN IDs that were (or would be) deleted.
             - ``"warnings"`` – mode-change warnings emitted during check mode.
-            - ``"changed_ports"`` – 0-based ports with membership changes.
+            - ``"changed_ports"`` – 1-based ports with membership changes.
             - ``"changed_vlans"`` – VLAN IDs touched by membership changes.
 
         Raises:
@@ -470,7 +470,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         desired_n = normalize_device_config(desired)
         current_per_port = build_current_per_port_from_vlans(
             current_vlans,
-            [settings.port_id - 1 for settings in current_ports],
+            [settings.port_id for settings in current_ports],
         )
         merged_desired_vlans = merge_port_vlan_membership_inputs(
             current_per_port,
@@ -608,7 +608,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         allow_port_mode_change: bool | None,
     ) -> VlanMembershipPlan:
         """Build a VLAN membership plan from current switch state."""
-        known_ports = [settings.port_id - 1 for settings in current_ports]
+        known_ports = [settings.port_id for settings in current_ports]
         current_per_port = build_current_per_port_from_vlans(current_vlans, known_ports)
         allow = (
             self._allow_port_mode_change
@@ -669,7 +669,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         post_vlans, post_ports = self._read_current_state(session)
         post_per_port = build_current_per_port_from_vlans(
             post_vlans,
-            [settings.port_id - 1 for settings in post_ports],
+            [settings.port_id for settings in post_ports],
         )
         expected: PortMembershipMap = {
             port_id: membership_plan.desired_per_port[port_id]

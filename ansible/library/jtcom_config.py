@@ -57,7 +57,7 @@ options:
     description: >
       Incremental VLAN changes, keyed by VLAN ID (string or int).
       Each entry may contain C(name), C(tagged_ports), C(untagged_ports),
-      and C(state) (C(present) or C(absent)).  Ports are 0-based indices.
+      and C(state) (C(present) or C(absent)).  Ports are 1-based IDs.
       Omitting C(state) defaults to C(present).  VLANs not listed are untouched.
     type: dict
   ports:
@@ -102,7 +102,7 @@ EXAMPLES = r"""
     vlans:
       10:
         name: Management
-        untagged_ports: [0]
+        untagged_ports: [1]
         state: present
       20:
         name: Data

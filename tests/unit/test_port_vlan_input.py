@@ -50,7 +50,7 @@ def test_access_and_native_vlan_can_coexist_with_trunk_lists() -> None:
 
 def test_port_only_input_translates_to_vlan_ops() -> None:
     merged = merge_port_vlan_membership_inputs(
-        {4: make_port_state()},
+        {5: make_port_state()},
         {},
         {
             5: PortConfig(
@@ -62,49 +62,49 @@ def test_port_only_input_translates_to_vlan_ops() -> None:
         },
     )
 
-    assert merged[10].untagged_add == [4]
-    assert merged[20].tagged_add == [4]
-    assert merged[30].tagged_remove == [4]
+    assert merged[10].untagged_add == [5]
+    assert merged[20].tagged_add == [5]
+    assert merged[30].tagged_remove == [5]
 
 
 def test_trunk_set_uses_current_tagged_membership() -> None:
     merged = merge_port_vlan_membership_inputs(
-        {4: make_port_state(tagged_vlans={10, 20, 30})},
+        {5: make_port_state(tagged_vlans={10, 20, 30})},
         {},
         {5: PortConfig(port_id=5, trunk_set_vlans=[20, 40])},
     )
 
-    assert merged[10].tagged_remove == [4]
+    assert merged[10].tagged_remove == [5]
     assert 20 not in merged
-    assert merged[30].tagged_remove == [4]
-    assert merged[40].tagged_add == [4]
+    assert merged[30].tagged_remove == [5]
+    assert merged[40].tagged_add == [5]
 
 
 def test_vlan_only_input_is_unchanged() -> None:
-    desired = {20: VlanConfig(vlan_id=20, tagged_add=[4])}
-    merged = merge_port_vlan_membership_inputs({4: make_port_state()}, desired, {})
+    desired = {20: VlanConfig(vlan_id=20, tagged_add=[5])}
+    merged = merge_port_vlan_membership_inputs({5: make_port_state()}, desired, {})
 
-    assert merged[20].tagged_add == [4]
-    assert desired[20].tagged_add == [4]
+    assert merged[20].tagged_add == [5]
+    assert desired[20].tagged_add == [5]
 
 
 def test_compatible_vlan_and_port_inputs_are_merged() -> None:
     merged = merge_port_vlan_membership_inputs(
-        {4: make_port_state()},
-        {20: VlanConfig(vlan_id=20, tagged_add=[4])},
+        {5: make_port_state()},
+        {20: VlanConfig(vlan_id=20, tagged_add=[5])},
         {5: PortConfig(port_id=5, native_vlan=10, trunk_add_vlans=[30])},
     )
 
-    assert merged[10].untagged_add == [4]
-    assert merged[20].tagged_add == [4]
-    assert merged[30].tagged_add == [4]
+    assert merged[10].untagged_add == [5]
+    assert merged[20].tagged_add == [5]
+    assert merged[30].tagged_add == [5]
 
 
 def test_untagged_dual_syntax_conflict_fails() -> None:
     with pytest.raises(DualSyntaxConflictError, match="Conflicting untagged VLANs"):
         merge_port_vlan_membership_inputs(
-            {4: make_port_state()},
-            {10: VlanConfig(vlan_id=10, untagged_add=[4])},
+            {5: make_port_state()},
+            {10: VlanConfig(vlan_id=10, untagged_add=[5])},
             {5: PortConfig(port_id=5, access_vlan=20)},
         )
 
@@ -112,8 +112,8 @@ def test_untagged_dual_syntax_conflict_fails() -> None:
 def test_tagged_dual_syntax_add_remove_conflict_fails() -> None:
     with pytest.raises(DualSyntaxConflictError, match="Conflicting tagged add/remove"):
         merge_port_vlan_membership_inputs(
-            {4: make_port_state(tagged_vlans={20})},
-            {20: VlanConfig(vlan_id=20, tagged_add=[4])},
+            {5: make_port_state(tagged_vlans={20})},
+            {20: VlanConfig(vlan_id=20, tagged_add=[5])},
             {5: PortConfig(port_id=5, trunk_remove_vlans=[20])},
         )
 
@@ -121,8 +121,8 @@ def test_tagged_dual_syntax_add_remove_conflict_fails() -> None:
 def test_untagged_dual_syntax_add_remove_conflict_fails() -> None:
     with pytest.raises(DualSyntaxConflictError, match="Conflicting untagged add/remove"):
         merge_port_vlan_membership_inputs(
-            {4: make_port_state(untagged_vlan=10)},
-            {10: VlanConfig(vlan_id=10, untagged_remove=[4])},
+            {5: make_port_state(untagged_vlan=10)},
+            {10: VlanConfig(vlan_id=10, untagged_remove=[5])},
             {5: PortConfig(port_id=5, access_vlan=10)},
         )
 
@@ -130,8 +130,8 @@ def test_untagged_dual_syntax_add_remove_conflict_fails() -> None:
 def test_trunk_set_conflicts_with_vlan_centric_tagged_ops_for_same_port() -> None:
     with pytest.raises(DualSyntaxConflictError, match="trunk_set_vlans"):
         merge_port_vlan_membership_inputs(
-            {4: make_port_state(tagged_vlans={20})},
-            {30: VlanConfig(vlan_id=30, tagged_add=[4])},
+            {5: make_port_state(tagged_vlans={20})},
+            {30: VlanConfig(vlan_id=30, tagged_add=[5])},
             {5: PortConfig(port_id=5, trunk_set_vlans=[20, 40])},
         )
 
@@ -164,10 +164,10 @@ def test_driver_check_mode_accepts_port_centric_vlan_input(
     )
 
     assert result["changed"] is True
-    assert result["changed_ports"] == [4]
+    assert result["changed_ports"] == [5]
     assert result["changed_vlans"] == [10, 20]
     assert result["diff"]["summary"]["port_update"] == 1
-    assert result["diff"]["vlan_membership"]["after"][4] == {
+    assert result["diff"]["vlan_membership"]["after"][5] == {
         "untagged_vlan": 10,
         "tagged_vlans": [20],
     }
@@ -189,13 +189,13 @@ def test_driver_leaves_vlan_centric_input_unchanged(
     )
 
     result = driver.apply_device_config(
-        DeviceConfig(vlans={20: VlanConfig(vlan_id=20, tagged_add=[4])}),
+        DeviceConfig(vlans={20: VlanConfig(vlan_id=20, tagged_add=[5])}),
         check_mode=True,
     )
 
-    assert result["changed_ports"] == [4]
+    assert result["changed_ports"] == [5]
     assert result["changed_vlans"] == [20]
-    assert result["diff"]["vlan_membership"]["after"][4]["tagged_vlans"] == [20]
+    assert result["diff"]["vlan_membership"]["after"][5]["tagged_vlans"] == [20]
 
 
 def test_driver_dual_syntax_conflict_fails_before_mutation(
@@ -218,7 +218,7 @@ def test_driver_dual_syntax_conflict_fails_before_mutation(
     with pytest.raises(DualSyntaxConflictError):
         driver.apply_device_config(
             DeviceConfig(
-                vlans={10: VlanConfig(vlan_id=10, untagged_add=[4])},
+                vlans={10: VlanConfig(vlan_id=10, untagged_add=[5])},
                 ports={5: PortConfig(port_id=5, access_vlan=20)},
             )
         )

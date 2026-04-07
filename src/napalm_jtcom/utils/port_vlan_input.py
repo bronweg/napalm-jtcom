@@ -29,8 +29,9 @@ def merge_port_vlan_membership_inputs(
 ) -> dict[int, VlanConfig]:
     """Return VLAN-centric configs with port-centric membership inputs merged.
 
-    ``PortConfig.port_id`` is 1-based.  The resulting ``VlanConfig`` membership
-    operations use the existing 0-based VLAN payload convention.
+    Port IDs are 1-based everywhere in the project.  The resulting
+    ``VlanConfig`` membership operations use the same 1-based port IDs that the
+    user supplied on ``PortConfig.port_id``.
     """
     result = {vid: _clone_vlan_config(cfg) for vid, cfg in sorted(desired_vlans.items())}
     tracker = _ConflictTracker()
@@ -41,7 +42,7 @@ def merge_port_vlan_membership_inputs(
     for port in sorted(desired_ports.values(), key=lambda item: item.port_id):
         if not port_has_vlan_membership_input(port):
             continue
-        port_id = port.port_id - 1
+        port_id = port.port_id
 
         if port.access_vlan is not None:
             tracker.record_untagged(port_id, port.access_vlan, "port.access_vlan")

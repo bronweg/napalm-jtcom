@@ -24,6 +24,7 @@ Idempotent, diff-aware PATCH-style configuration of VLANs and ports.
 
 - **VLANs** support `state: present | absent` (incremental — unlisted VLANs untouched)
 - **Ports** are patch-only: supply only the fields you want to change
+- Port numbering is 1-based everywhere: switch `Port 5` is configured as port `5`
 - Supports Ansible `--check` (dry-run) mode
 - Port 6 (management uplink) cannot be administratively disabled
 - VLAN 1 cannot be deleted
@@ -38,7 +39,7 @@ Idempotent, diff-aware PATCH-style configuration of VLANs and ports.
     vlans:
       10:
         name: Management
-        untagged_ports: [0]
+        untagged_ports: [1]
       99:
         state: absent
     ports:
