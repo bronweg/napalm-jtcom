@@ -37,6 +37,9 @@ class DeviceConfig:
         Converts :class:`~napalm_jtcom.model.vlan.VlanEntry` port name strings
         (``"Port N"``) to the same 1-based port IDs used everywhere in the
         project, including :class:`~napalm_jtcom.model.vlan.VlanConfig`.
+        ``VlanEntry`` membership is already interpreted canonically here:
+        tagged ports mean on-wire tagged membership and untagged ports mean the
+        single on-wire untagged VLAN.
 
         Args:
             current_vlans: VLAN ID to :class:`VlanEntry` mapping from the parser.

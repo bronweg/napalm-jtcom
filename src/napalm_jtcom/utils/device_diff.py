@@ -10,6 +10,9 @@ Each VLAN/port entry in *desired* carries a ``state`` field:
 - ``"absent"`` — delete the VLAN (ports: administratively disable).
 
 Items **not** mentioned in *desired* are left completely untouched.
+
+Membership diffs in this module are expressed in canonical tagged/untagged
+terms rather than JTCom backend native/permit fields.
 """
 
 from __future__ import annotations

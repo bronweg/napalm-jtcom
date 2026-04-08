@@ -1,0 +1,21 @@
+---
+- name: Configure an access port on JTCom switch
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    switch_host: 192.0.2.1
+    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin') }}"
+    switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
+
+  tasks:
+    - name: Put port 3 into access VLAN 20
+      bronweg.cgiswitch.jtcom_config:
+        host: "{{ switch_host }}"
+        username: "{{ switch_user }}"
+        password: "{{ switch_pass }}"
+        verify_tls: false
+        ports:
+          3:
+            access_vlan: 20

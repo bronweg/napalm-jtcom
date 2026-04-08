@@ -10,6 +10,9 @@ Each entry in *desired* carries a ``state`` field:
 - ``"absent"`` — delete the VLAN if it exists (VLAN 1 is never deleted).
 
 VLANs not mentioned in *desired* are left untouched.
+
+This planner reasons in canonical tagged/untagged VLAN membership semantics.
+It does not build JTCom backend ``native_vlan``/``permit_vlans`` state.
 """
 
 from __future__ import annotations

@@ -13,7 +13,8 @@ Ansible Collection for managing JTCom CGI-based L2 Ethernet switches via
 
 ```bash
 ansible-galaxy collection install bronweg-cgiswitch-0.1.0.tar.gz
-pip install napalm-jtcom
+cd /path/to/napalm-jtcom
+python -m pip install -e .
 ```
 
 ## Modules
@@ -29,6 +30,21 @@ Idempotent, diff-aware PATCH-style configuration of VLANs and ports.
 - Port 6 (management uplink) cannot be administratively disabled
 - VLAN 1 cannot be deleted
 
+Canonical model:
+
+- `untagged_vlan`: VLAN sent untagged on wire
+- `tagged_vlans`: VLANs sent tagged on wire
+
+JTCom backend model:
+
+- access mode: `access_vlan`
+- trunk mode: `native_vlan` + `permit_vlans`
+- on JTCom, `permit_vlans` includes `native_vlan`
+
+The collection accepts VLAN-centric and port-centric input, plans on canonical
+state, compiles to JTCom backend state only at write time, then verifies
+canonical expected vs canonical actual.
+
 VLAN membership policy:
 
 - Untagged/native VLAN moves fail by default; use `allow_untagged_move: true`
@@ -39,6 +55,14 @@ VLAN membership policy:
   access VLAN 1 and a `mode_none_mapped_to_vlan1` warning is returned. This
   fallback can still trigger access↔trunk protection if the effective result
   changes port mode.
+
+Warnings are structured objects with common fields such as:
+
+- `type`
+- `entity`
+- `message`
+- `port_id` / `vlan_id`
+- `hint`
 
 ```yaml
 - name: Configure switch
@@ -60,7 +84,14 @@ VLAN membership policy:
         flow_control: false
 ```
 
-See `examples/` for ready-to-run playbooks.
+Ready-to-run examples:
+
+- `examples/vlan_create.yml`
+- `examples/access_port.yml`
+- `examples/trunk_port.yml`
+- `examples/policy_overrides.yml`
+- `examples/vlan_delete.yml`
+- `examples/port_patch.yml`
 
 ## License
 

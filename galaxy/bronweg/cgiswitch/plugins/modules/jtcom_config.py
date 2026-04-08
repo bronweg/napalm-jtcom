@@ -17,6 +17,9 @@ description:
   - Idempotent configuration of VLANs and ports on JTCom-compatible L2 switches.
   - Wraps napalm-jtcom C(apply_device_config()) for deterministic, diff-aware apply.
   - Supports Ansible check mode (dry-run) natively.
+  - Ports are 1-based everywhere.
+  - VLAN membership input uses canonical on-wire semantics: C(untagged) means
+    the VLAN sent untagged on wire, and C(tagged) means VLANs sent tagged on wire.
 options:
   host:
     description: IP address or hostname of the switch.
@@ -36,11 +39,13 @@ options:
     type: bool
     default: true
   backup_before_change:
-    description: Download and save a config backup before applying any change.
+    description: Download and save a config backup before applying any real change.
     type: bool
     default: true
   allow_port_mode_change:
-    description: Allow VLAN membership operations to change a port between access and trunk mode.
+    description: >
+      Allow VLAN membership changes that would move a port between effective
+      access and trunk mode. Blocked by default.
     type: bool
     default: false
   allow_untagged_move:
@@ -58,10 +63,12 @@ options:
   vlans:
     description: >
       Incremental VLAN changes, keyed by VLAN ID (string or int).
-      Each entry may contain C(name), C(tagged_ports), C(untagged_ports),
-      and C(state) (C(present) or C(absent)).  Ports are 1-based IDs.
-      Omitting C(state) defaults to C(present).  VLANs not listed are untouched.
-      VLAN 1 cannot be deleted.
+      VLAN-centric membership fields are expressed in canonical on-wire terms
+      and may contain C(tagged_ports), C(untagged_ports), C(tagged_add),
+      C(tagged_remove), C(tagged_set), C(untagged_add), C(untagged_remove),
+      C(untagged_set), C(name), and C(state).
+      Ports are 1-based IDs. Omitting C(state) defaults to C(present).
+      VLANs not listed are untouched. VLAN 1 cannot be deleted.
     type: dict
   ports:
     description: >
@@ -69,15 +76,23 @@ options:
       Each entry may contain C(admin_up) (bool), C(speed) (str),
       C(flow_control) (bool), and optional VLAN membership shortcuts:
       C(access_vlan), C(native_vlan), C(trunk_add_vlans), C(trunk_remove_vlans),
-      and C(trunk_set_vlans).  Port-centric VLAN input is translated to
-      canonical VLAN-centric operations before planning.  Set C(admin_up: false)
-      to administratively disable a port.  Ports not listed are untouched.
-      Port 6 (management uplink) cannot be administratively disabled.
+      and C(trunk_set_vlans). Port-centric VLAN input is translated to the same
+      canonical membership planner used for VLAN-centric syntax.
+      C(access_vlan) configures a canonical untagged access port.
+      C(native_vlan) + C(trunk_*) configures a canonical trunk.
+      Set C(admin_up: false) to administratively disable a port.
+      Ports not listed are untouched. Port 6 (management uplink) cannot be
+      administratively disabled.
     type: dict
 notes:
   - "Run this module on the Ansible controller (C(connection: local))."
   - napalm-jtcom must be installed in the Python environment used by Ansible.
   - Use C(--check) for a safe dry-run that shows planned changes without applying them.
+  - Untagged/native VLAN moves are blocked by default.
+  - VLAN delete-in-use is blocked by default.
+  - Access/trunk mode changes are blocked by default.
+  - If a changed port would otherwise have no VLAN membership, it is mapped to
+    access VLAN 1 and a structured warning is returned.
 requirements:
   - napalm-jtcom >= 0.8.0
 author:
@@ -85,49 +100,62 @@ author:
 """
 
 EXAMPLES = r"""
-- name: Ensure VLAN 10 exists (check mode)
+- name: Create VLAN 61 and tag ports 1..5
   bronweg.cgiswitch.jtcom_config:
     host: 192.0.2.1
     username: "{{ jtcom_user }}"
     password: "{{ jtcom_pass }}"
     verify_tls: false
     vlans:
-      10:
-        name: Management
-  check_mode: true
+      61:
+        name: Admin
+        tagged_add: [1, 2, 3, 4, 5]
 
-- name: Apply VLAN and port config (incremental)
+- name: Configure access port 3 in VLAN 20
   bronweg.cgiswitch.jtcom_config:
     host: 192.0.2.1
     username: "{{ jtcom_user }}"
     password: "{{ jtcom_pass }}"
     verify_tls: false
-    vlans:
-      10:
-        name: Management
-        untagged_ports: [1]
-        state: present
-      20:
-        name: Data
-        tagged_ports: [7]
-        untagged_ports: [1, 2, 3]
-        state: present
-      99:
-        state: absent
     ports:
-      1:
-        admin_up: true
-        speed: Auto
-        flow_control: false
-        access_vlan: 10
       3:
-        admin_up: false
-      8:
+        access_vlan: 20
+
+- name: Configure trunk port 5 with native VLAN 10 and tagged VLANs 20,30
+  bronweg.cgiswitch.jtcom_config:
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
+    verify_tls: false
+    ports:
+      5:
         native_vlan: 10
         trunk_set_vlans: [20, 30]
+
+- name: Allow an explicit untagged move from VLAN 20 to VLAN 30
+  bronweg.cgiswitch.jtcom_config:
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
+    verify_tls: false
+    ports:
+      3:
+        access_vlan: 30
     allow_untagged_move: true
 
-- name: Force-delete a VLAN after detaching it from ports
+- name: Allow an access to trunk mode change when intended
+  bronweg.cgiswitch.jtcom_config:
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
+    verify_tls: false
+    ports:
+      5:
+        native_vlan: 10
+        trunk_set_vlans: [20, 30]
+    allow_port_mode_change: true
+
+- name: Force-delete a VLAN after detaching it from ports first
   bronweg.cgiswitch.jtcom_config:
     host: 192.0.2.1
     username: "{{ jtcom_user }}"
@@ -137,6 +165,17 @@ EXAMPLES = r"""
       20:
         state: absent
     allow_vlan_delete_in_use: true
+
+- name: Dry-run a change and inspect structured warnings
+  bronweg.cgiswitch.jtcom_config:
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
+    verify_tls: false
+    vlans:
+      61:
+        tagged_add: [1, 2, 3, 4, 5]
+  check_mode: true
 """
 
 RETURN = r"""
@@ -160,7 +199,12 @@ applied:
   elements: str
   returned: always
 warnings:
-  description: VLAN membership safety warnings, including check-mode access/trunk transitions.
+  description: >
+    Structured warning objects returned by the VLAN membership policy layer.
+    Common fields include C(type), C(entity), C(message), C(hint), and
+    C(port_id) or C(vlan_id) when applicable. Typical warning types include
+    C(untagged_move), C(vlan_delete_in_use), C(mode_none_mapped_to_vlan1),
+    and C(port_mode_change).
   type: list
   returned: always
 """

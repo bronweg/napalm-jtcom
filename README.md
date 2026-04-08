@@ -51,6 +51,36 @@ pip install -e ".[dev]"
 | Ansible standalone plugin | `ansible/` — zero subprocess, direct import |
 | Ansible Galaxy collection | `bronweg.cgiswitch.jtcom_config` |
 
+### Port Numbering
+
+Ports are 1-based everywhere in this project:
+
+- switch `Port 5`
+- `PortConfig(port_id=5)`
+- `VlanConfig(... tagged_add=[5])`
+- `changed_ports: [5]`
+
+all refer to the same physical port.
+
+### Canonical Model vs JTCom Backend
+
+User input, planning, policy checks, diffs, and verification all use the same
+canonical on-wire VLAN membership model:
+
+- `untagged_vlan`: the single VLAN sent untagged on wire
+- `tagged_vlans`: VLANs sent tagged on wire
+
+JTCom itself uses a backend-specific model:
+
+- access mode: `access_vlan`
+- trunk mode: `native_vlan` + `permit_vlans`
+- on JTCom, `permit_vlans` includes `native_vlan`
+
+You normally do not need to think in backend terms. The driver compiles
+canonical desired state into JTCom backend state only at the final write
+boundary, then normalizes JTCom readback back into canonical state before
+verification.
+
 ### Incremental Change Model
 
 All write operations use an **incremental / patch model**: only the VLANs and ports you
@@ -65,6 +95,18 @@ list are affected. Unlisted items are always left untouched.
 - VLAN membership accepts both VLAN-centric and port-centric input. Both are
   translated into the same canonical membership engine before planning.
 
+### Supported Configuration Styles
+
+- VLAN-centric:
+  - `tagged_add`, `tagged_remove`, `tagged_set`
+  - `untagged_add`, `untagged_remove`, `untagged_set`
+- Port-centric:
+  - `access_vlan`
+  - `native_vlan`
+  - `trunk_add_vlans`
+  - `trunk_remove_vlans`
+  - `trunk_set_vlans`
+
 ### VLAN Membership Policy
 
 Potentially destructive or ambiguous VLAN membership changes are policy-gated:
@@ -77,6 +119,23 @@ Potentially destructive or ambiguous VLAN membership changes are policy-gated:
   layer maps it explicitly to access VLAN 1 and emits a structured
   `mode_none_mapped_to_vlan1` warning. This fallback can still trigger
   access↔trunk protection if the effective result changes port mode.
+
+### Warning Objects
+
+Write operations return structured warning objects. Common fields:
+
+- `type`
+- `entity`
+- `message`
+- `port_id` or `vlan_id` when applicable
+- `hint`
+
+Common warning types:
+
+- `untagged_move`
+- `vlan_delete_in_use`
+- `mode_none_mapped_to_vlan1`
+- `port_mode_change`
 
 ---
 
@@ -120,6 +179,61 @@ try:
         dry_run=True,
     )
     print(result)
+finally:
+    driver.close()
+```
+
+### Access Port Example
+
+```python
+from napalm_jtcom.driver import JTComDriver
+from napalm_jtcom.model.config import DeviceConfig
+from napalm_jtcom.model.port import PortConfig
+
+driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
+driver.open()
+
+try:
+    result = driver.apply_device_config(
+        DeviceConfig(
+            ports={
+                3: PortConfig(
+                    port_id=3,
+                    access_vlan=20,
+                ),
+            },
+        ),
+        check_mode=True,
+    )
+    print(result["warnings"])
+finally:
+    driver.close()
+```
+
+### Trunk Port Example
+
+```python
+from napalm_jtcom.driver import JTComDriver
+from napalm_jtcom.model.config import DeviceConfig
+from napalm_jtcom.model.port import PortConfig
+
+driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
+driver.open()
+
+try:
+    result = driver.apply_device_config(
+        DeviceConfig(
+            ports={
+                5: PortConfig(
+                    port_id=5,
+                    native_vlan=10,
+                    trunk_set_vlans=[20, 30],
+                ),
+            },
+        ),
+        check_mode=True,
+    )
+    print(result["diff"])
 finally:
     driver.close()
 ```
@@ -187,6 +301,12 @@ finally:
     driver.close()
 ```
 
+### Dry-Run Example
+
+Both `set_vlans(..., dry_run=True)` and `apply_device_config(..., check_mode=True)`
+return planned diffs, changed ports/VLANs, and structured warnings without
+writing to the device.
+
 Runnable scripts in [`examples/`](examples):
 - [`examples/get_facts.py`](examples/get_facts.py)
 - [`examples/get_interfaces.py`](examples/get_interfaces.py)
@@ -245,6 +365,15 @@ Example task:
         flow_control: false
 ```
 
+Common standalone scenarios:
+
+- create VLAN 61 and tag ports 1..5
+- configure an access port with `access_vlan`
+- configure a trunk with `native_vlan` + `trunk_set_vlans`
+- allow an explicit untagged move with `allow_untagged_move: true`
+- allow VLAN delete-in-use with `allow_vlan_delete_in_use: true`
+- review warnings safely with `--check`
+
 ### Galaxy Collection (`bronweg.cgiswitch`)
 
 A packaged collection lives at `galaxy/bronweg/cgiswitch/`.
@@ -300,6 +429,9 @@ Both the standalone plugin and the collection support Ansible `--check` (dry-run
 | Port speed key | `speed_duplex` | `speed` |
 
 Collection examples:
+- [`galaxy/bronweg/cgiswitch/examples/access_port.yml`](galaxy/bronweg/cgiswitch/examples/access_port.yml)
+- [`galaxy/bronweg/cgiswitch/examples/trunk_port.yml`](galaxy/bronweg/cgiswitch/examples/trunk_port.yml)
+- [`galaxy/bronweg/cgiswitch/examples/policy_overrides.yml`](galaxy/bronweg/cgiswitch/examples/policy_overrides.yml)
 - [`galaxy/bronweg/cgiswitch/examples/vlan_create.yml`](galaxy/bronweg/cgiswitch/examples/vlan_create.yml)
 - [`galaxy/bronweg/cgiswitch/examples/vlan_delete.yml`](galaxy/bronweg/cgiswitch/examples/vlan_delete.yml)
 - [`galaxy/bronweg/cgiswitch/examples/port_patch.yml`](galaxy/bronweg/cgiswitch/examples/port_patch.yml)
@@ -341,6 +473,17 @@ napalm-jtcom/
   examples/            # Runnable Python usage examples
   docs/                # Developer documentation
 ```
+
+## Architecture Note
+
+Runtime flow:
+
+1. normalize input
+2. merge VLAN-centric and port-centric syntax
+3. plan and apply policy on canonical state
+4. compile canonical state to JTCom backend only at write time
+5. read JTCom state back and normalize to canonical state
+6. verify canonical expected vs canonical actual
 
 ---
 

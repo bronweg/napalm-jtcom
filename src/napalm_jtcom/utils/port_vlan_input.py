@@ -1,8 +1,9 @@
 """Port-centric VLAN membership input translation.
 
-The runtime membership engine consumes canonical VLAN-centric
-``VlanConfig`` operations.  This module translates the optional VLAN fields on
-``PortConfig`` into those operations and detects ambiguous dual-syntax input.
+The runtime membership engine plans on canonical per-port membership semantics.
+This module translates optional VLAN fields on ``PortConfig`` into
+VLAN-centric ``VlanConfig`` mutation operations before canonical planning and
+policy evaluation.
 """
 
 from __future__ import annotations
@@ -31,7 +32,8 @@ def merge_port_vlan_membership_inputs(
 
     Port IDs are 1-based everywhere in the project.  The resulting
     ``VlanConfig`` membership operations use the same 1-based port IDs that the
-    user supplied on ``PortConfig.port_id``.
+    user supplied on ``PortConfig.port_id``.  Conflict detection happens before
+    those operations are handed to the canonical membership planner.
     """
     result = {vid: _clone_vlan_config(cfg) for vid, cfg in sorted(desired_vlans.items())}
     tracker = _ConflictTracker()

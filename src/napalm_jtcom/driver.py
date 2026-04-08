@@ -55,6 +55,15 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
     Communicates with the switch via its HTTP CGI web interface.
     HTML responses are parsed with BeautifulSoup to extract structured data.
 
+    Runtime architecture:
+
+    - current and desired VLAN membership are modeled canonically as
+      ``untagged_vlan`` + ``tagged_vlans``
+    - Step 4 policy checks run on that canonical state
+    - JTCom backend ``access/native/permit`` state is produced only at the
+      final apply boundary
+    - post-apply verification compares canonical expected vs canonical actual
+
     Args:
         hostname: IP address or hostname of the switch, optionally including
             the URL scheme (e.g. ``http://192.168.1.1``).
@@ -635,7 +644,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         allow_untagged_move: bool | None,
         allow_vlan_delete_in_use: bool | None,
     ) -> VlanMembershipPlan:
-        """Build a VLAN membership plan from current switch state."""
+        """Build a canonical VLAN membership plan from current switch state."""
         known_ports = [settings.port_id for settings in current_ports]
         current_per_port = build_current_per_port_from_vlans(current_vlans, known_ports)
         allow = (
@@ -706,7 +715,9 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
     ) -> None:
         """Verify changed VLAN membership ports after a real apply.
 
-        Expected and actual states are both canonicalized before comparison.
+        Expected state comes directly from the canonical plan. Actual state is
+        read back from JTCom, normalized to canonical semantics, and compared
+        without any backend-shaped reinterpretation.
         """
         if not membership_plan.changed_ports:
             return

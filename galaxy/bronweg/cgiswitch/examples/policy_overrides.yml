@@ -1,0 +1,33 @@
+---
+- name: Demonstrate explicit policy overrides on JTCom switch
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    switch_host: 192.0.2.1
+    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin') }}"
+    switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
+
+  tasks:
+    - name: Move an access port from VLAN 20 to VLAN 30
+      bronweg.cgiswitch.jtcom_config:
+        host: "{{ switch_host }}"
+        username: "{{ switch_user }}"
+        password: "{{ switch_pass }}"
+        verify_tls: false
+        allow_untagged_move: true
+        ports:
+          3:
+            access_vlan: 30
+
+    - name: Delete a VLAN that is still in use
+      bronweg.cgiswitch.jtcom_config:
+        host: "{{ switch_host }}"
+        username: "{{ switch_user }}"
+        password: "{{ switch_pass }}"
+        verify_tls: false
+        allow_vlan_delete_in_use: true
+        vlans:
+          61:
+            state: absent
