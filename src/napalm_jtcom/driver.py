@@ -31,6 +31,7 @@ from napalm_jtcom.utils.vlan_membership import (
     build_current_per_port_from_jtcom_readback,
     build_current_per_port_from_vlans,
     canonical_to_jtcom_port_vlan_state,
+    copy_port_state,
     diff_membership_maps,
     plan_vlan_membership_changes,
     port_name_to_id,
@@ -666,12 +667,14 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
     ) -> None:
         """Compile canonical desired state to JTCom backend state at write time."""
         for port_id in membership_plan.changed_ports:
-            desired_state = membership_plan.desired_per_port[port_id]
+            desired_state = copy_port_state(membership_plan.desired_per_port[port_id])
+            # This is the only place where canonical desired port state is
+            # compiled into JTCom backend representation.
             try:
                 backend_state = canonical_to_jtcom_port_vlan_state(desired_state)
             except ValueError as exc:
                 raise ValueError(
-                    f"port_id={port_id}: canonical VLAN state cannot be compiled for JTCom "
+                    f"Port {port_id} canonical state cannot be compiled to JTCom "
                     f"backend: {exc}"
                 ) from exc
 
@@ -713,7 +716,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             [settings.port_id for settings in post_ports],
         )
         expected: PortMembershipMap = {
-            port_id: membership_plan.desired_per_port[port_id]
+            port_id: copy_port_state(membership_plan.desired_per_port[port_id])
             for port_id in membership_plan.changed_ports
         }
         actual: PortMembershipMap = {

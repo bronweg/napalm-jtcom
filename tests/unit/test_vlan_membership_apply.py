@@ -15,6 +15,7 @@ from napalm_jtcom.driver import JTComDriver
 from napalm_jtcom.model.port import PortSettings
 from napalm_jtcom.model.vlan import VlanConfig, VlanEntry, VlanPortConfig
 from napalm_jtcom.utils.vlan_membership import (
+    PortMembershipMap,
     VlanDeleteInUseError,
     VlanMembershipModeChangeError,
     VlanMembershipPlan,
@@ -237,6 +238,63 @@ def test_driver_apply_uses_shared_canonical_to_jtcom_compiler(
     payload = session.post.call_args.kwargs["data"]
     assert payload["NativeVlan"] == "1"
     assert payload["PermitVlan"] == "1_61"
+
+
+def test_apply_boundary_rejects_tagged_only_canonical_state_clearly() -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+
+    with pytest.raises(
+        ValueError,
+        match="Port 5 canonical state cannot be compiled to JTCom backend",
+    ):
+        driver._apply_vlan_membership_plan(
+            MagicMock(),
+            VlanMembershipPlan(
+                current_per_port={5: make_port_state()},
+                desired_per_port={5: make_port_state(tagged_vlans={61})},
+                changed_ports=[5],
+                changed_vlans=[61],
+                warnings=[],
+            ),
+        )
+
+
+def test_apply_boundary_rejects_empty_canonical_state_clearly() -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+
+    with pytest.raises(
+        ValueError,
+        match="Port 5 canonical state cannot be compiled to JTCom backend",
+    ):
+        driver._apply_vlan_membership_plan(
+            MagicMock(),
+            VlanMembershipPlan(
+                current_per_port={5: make_port_state(untagged_vlan=10)},
+                desired_per_port={5: make_port_state()},
+                changed_ports=[5],
+                changed_vlans=[10],
+                warnings=[],
+            ),
+        )
+
+
+def test_apply_boundary_does_not_mutate_canonical_plan_state() -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    session = MagicMock()
+    desired_state = make_port_state(untagged_vlan=1, tagged_vlans={61})
+    plan = VlanMembershipPlan(
+        current_per_port={1: make_port_state(untagged_vlan=1)},
+        desired_per_port={1: desired_state},
+        changed_ports=[1],
+        changed_vlans=[61],
+        warnings=[],
+    )
+    before = make_port_state(untagged_vlan=1, tagged_vlans={61})
+
+    driver._apply_vlan_membership_plan(session, plan)
+
+    assert plan.desired_per_port[1] == before
+    assert desired_state == before
 
 
 def test_real_world_trunk_playbook_scenario_stays_canonical_until_apply() -> None:
@@ -588,6 +646,48 @@ def test_verify_vlan_membership_accepts_canonicalized_jtcom_trunk_readback(
     )
 
     driver._verify_vlan_membership(session, membership_plan)
+
+
+def test_verify_expected_state_remains_canonical_not_backend_shaped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    session = MagicMock()
+    membership_plan = VlanMembershipPlan(
+        current_per_port={1: make_port_state(untagged_vlan=1)},
+        desired_per_port={1: make_port_state(untagged_vlan=1, tagged_vlans={61})},
+        changed_ports=[1],
+        changed_vlans=[61],
+        warnings=[],
+    )
+
+    monkeypatch.setattr(
+        driver,
+        "_read_current_state",
+        lambda _session: (
+            {
+                1: VlanEntry(vlan_id=1, name="default", untagged_ports=["Port 1"]),
+                61: VlanEntry(vlan_id=61, name="admin", tagged_ports=["Port 1"]),
+            },
+            [PortSettings(port_id=1, name="Port 1", admin_up=True)],
+        ),
+    )
+
+    captured: dict[str, PortMembershipMap] = {}
+    driver_module = __import__("napalm_jtcom.driver", fromlist=["diff_membership_maps"])
+    original_diff = driver_module.diff_membership_maps
+
+    def capture_diff(current: PortMembershipMap, desired: PortMembershipMap) -> dict[str, object]:
+        captured["current"] = current
+        captured["desired"] = desired
+        return original_diff(current, desired)
+
+    monkeypatch.setattr("napalm_jtcom.driver.diff_membership_maps", capture_diff)
+
+    driver._verify_vlan_membership(session, membership_plan)
+
+    assert captured["desired"][1] == make_port_state(untagged_vlan=1, tagged_vlans={61})
+    assert captured["desired"][1]["tagged_vlans"] == {61}
 
 
 def test_verify_vlan_membership_still_fails_on_real_canonical_mismatch(

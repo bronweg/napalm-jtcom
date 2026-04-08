@@ -131,7 +131,12 @@ class VlanDeleteInUseError(ValueError):
 
 @dataclass
 class VlanMembershipPlan:
-    """Computed VLAN membership plan."""
+    """Computed VLAN membership plan.
+
+    Canonical ``desired_per_port`` is the vendor-independent source of truth
+    for planning and policy. Backend-specific representations must not be
+    constructed outside conversion helpers.
+    """
 
     current_per_port: PortMembershipMap
     desired_per_port: PortMembershipMap
@@ -457,7 +462,8 @@ def plan_vlan_membership_changes(
     if untagged_move_warnings and not allow_untagged_move and not check_mode:
         raise VlanMembershipUntaggedMoveError(untagged_move_warnings)
 
-    # Canonical desired_per_port is the vendor-independent planning truth.
+    # Step 4 policy operates only on canonical desired_per_port.
+    # Backend-specific JTCom state is compiled later at the write boundary.
     mode_none_warnings = apply_mode_none_fallback(desired, changed_ports(current, desired))
     changed = changed_ports(current, desired)
     mode_change_warnings = detect_mode_change_warnings(current, desired)
@@ -490,6 +496,11 @@ def copy_membership_map(source: PortMembershipMap) -> PortMembershipMap:
         port_id: make_port_state(_untagged_vlan(state), _tagged_vlans(state))
         for port_id, state in sorted(source.items())
     }
+
+
+def copy_port_state(state: PortMembershipState) -> PortMembershipState:
+    """Return a deep copy of one canonical port membership state."""
+    return make_port_state(_untagged_vlan(state), _tagged_vlans(state))
 
 
 def normalize_tagged_untagged_consistency(per_port: PortMembershipMap) -> None:
