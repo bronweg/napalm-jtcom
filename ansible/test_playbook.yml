@@ -24,17 +24,12 @@
         username: "{{ jtcom_user }}"
         password: "{{ jtcom_pass }}"
         backup_before_change: true
-        safety_port_id: 6
+        allow_port_mode_change: true
         vlans:
-          223:
-            name: Test_VLAN
+          61:
+            name: Admin_VLAN
             state: present
-            tagged_ports: [1, 2, 3, 4, 5, 6, 7, 8]
-        ports:
-          1:
-            admin_up: true
-            speed_duplex: Auto
-            flow_control: false
+            tagged_ports: [1, 2, 3, 4, 5]
       register: result
 
     - name: Show result
