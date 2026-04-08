@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal, TypedDict
 
-from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
+from napalm_jtcom.model.vlan import VlanConfig, VlanEntry, VlanPortConfig
 
 PortMode = Literal["access", "trunk", "none"]
 BackendPortMode = Literal["access", "trunk"]
@@ -376,6 +376,48 @@ def build_current_per_port_from_vlans(
                 raise ValueError(f"Cannot parse tagged port name {port_name!r} in VLAN {vlan_id}")
             current.setdefault(port_id, make_port_state())
             _tagged_vlans(current[port_id]).add(vlan_id)
+
+    return current
+
+
+def build_current_per_port_from_jtcom_readback(
+    port_configs: Iterable[VlanPortConfig],
+    known_ports: Iterable[int],
+) -> PortMembershipMap:
+    """Build canonical current membership from JTCom backend port readback.
+
+    JTCom backend trunk readback is expressed as ``native_vlan`` plus
+    ``permit_vlans`` where ``permit_vlans`` includes ``native_vlan``.
+    This helper normalizes that backend representation into canonical on-wire
+    semantics via :func:`jtcom_to_canonical_port_vlan_state`.
+    """
+    current: PortMembershipMap = {port_id: make_port_state() for port_id in known_ports}
+
+    for backend_port in port_configs:
+        port_id = _port_name_to_id(backend_port.port_name)
+        if port_id is None:
+            raise ValueError(f"Cannot parse backend port name {backend_port.port_name!r}")
+        backend_mode = backend_port.vlan_type.lower()
+        if backend_mode == "access":
+            backend_state: JTComPortVlanState = {
+                "mode": "access",
+                "access_vlan": backend_port.access_vlan,
+                "native_vlan": None,
+                "permit_vlans": [],
+            }
+        elif backend_mode == "trunk":
+            backend_state = {
+                "mode": "trunk",
+                "access_vlan": None,
+                "native_vlan": backend_port.native_vlan,
+                "permit_vlans": list(backend_port.permit_vlans),
+            }
+        else:
+            raise ValueError(
+                f"Unsupported JTCom backend VLAN mode {backend_port.vlan_type!r} "
+                f"for port {backend_port.port_name!r}"
+            )
+        current[port_id] = jtcom_to_canonical_port_vlan_state(backend_state)
 
     return current
 

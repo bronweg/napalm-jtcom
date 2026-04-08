@@ -15,7 +15,7 @@ from napalm_jtcom.client.session import JTComCredentials, JTComSession
 from napalm_jtcom.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
 from napalm_jtcom.model.config import DeviceConfig
 from napalm_jtcom.model.port import PortChangeSet, PortConfig, PortSettings
-from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
+from napalm_jtcom.model.vlan import VlanConfig, VlanEntry, VlanPortConfig
 from napalm_jtcom.parser.device import parse_device_info, parse_uptime_seconds
 from napalm_jtcom.parser.port import parse_port_page
 from napalm_jtcom.parser.vlan import parse_port_vlan_settings, parse_static_vlans
@@ -28,6 +28,7 @@ from napalm_jtcom.utils.vlan_diff import plan_vlan_changes
 from napalm_jtcom.utils.vlan_membership import (
     PortMembershipMap,
     VlanMembershipPlan,
+    build_current_per_port_from_jtcom_readback,
     build_current_per_port_from_vlans,
     diff_membership_maps,
     plan_vlan_membership_changes,
@@ -726,8 +727,9 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         """Fetch static VLANs and port-based VLAN settings, merge into a map.
 
         Reads the static VLAN list and per-port VLAN configuration from the
-        switch, then populates each :class:`VlanEntry` with its tagged and
-        untagged port memberships.
+        switch, normalizes JTCom backend trunk/access readback into canonical
+        per-port membership semantics, then materializes :class:`VlanEntry`
+        objects from that canonical state.
 
         Args:
             session: Active authenticated session.
@@ -742,20 +744,35 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         port_configs = parse_port_vlan_settings(port_html)
 
         vlan_map: dict[int, VlanEntry] = {v.vlan_id: v for v in vlans}
-        for pc in port_configs:
-            if pc.vlan_type.lower() == "access" and pc.access_vlan is not None:
-                entry = vlan_map.get(pc.access_vlan)
+        known_ports = [
+            port_id
+            for pc in port_configs
+            if (port_id := _port_config_id(pc)) is not None
+        ]
+        current_per_port = build_current_per_port_from_jtcom_readback(
+            port_configs,
+            known_ports,
+        )
+        port_name_by_id = {
+            port_id: pc.port_name
+            for pc in port_configs
+            if (port_id := _port_config_id(pc)) is not None
+        }
+        for port_id, state in current_per_port.items():
+            port_name = port_name_by_id.get(port_id)
+            if port_name is None:
+                continue
+            untagged_vlan = state["untagged_vlan"]
+            if isinstance(untagged_vlan, int):
+                entry = vlan_map.get(untagged_vlan)
                 if entry is not None:
-                    entry.untagged_ports.append(pc.port_name)
-            elif pc.vlan_type.lower() == "trunk":
-                if pc.native_vlan is not None:
-                    entry = vlan_map.get(pc.native_vlan)
-                    if entry is not None:
-                        entry.untagged_ports.append(pc.port_name)
-                for vid in pc.permit_vlans:
+                    entry.untagged_ports.append(port_name)
+            tagged_vlans = state["tagged_vlans"]
+            if isinstance(tagged_vlans, set):
+                for vid in sorted(tagged_vlans):
                     entry = vlan_map.get(vid)
                     if entry is not None:
-                        entry.tagged_ports.append(pc.port_name)
+                        entry.tagged_ports.append(port_name)
         return vlan_map
 
     def _read_current_state(
@@ -822,3 +839,11 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         if self._session is None:
             raise JTComError("Session not open — call open() first.")
         return self._session
+
+
+def _port_config_id(port_config: VlanPortConfig) -> int | None:
+    """Parse a 1-based port ID from vendor port labels like ``Port 5``."""
+    parts = port_config.port_name.rsplit(" ", 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return int(parts[1])
+    return None
