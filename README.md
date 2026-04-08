@@ -27,10 +27,6 @@ any tool built on top of NAPALM.
 ## Installation
 
 ```bash
-# From PyPI (once published)
-pip install napalm-jtcom
-
-# From source (development)
 git clone https://github.com/bronweg/napalm-jtcom.git
 cd napalm-jtcom
 python -m venv .venv
@@ -48,6 +44,8 @@ pip install -e ".[dev]"
 | Read interfaces | `get_interfaces()` |
 | Read VLANs | `get_vlans()` |
 | Incremental VLAN changes | `set_vlans(desired, dry_run=False)` |
+| VLAN-centric membership ops | `tagged_add/remove/set`, `untagged_add/remove/set` |
+| Port-centric membership ops | `access_vlan`, `native_vlan`, `trunk_add_vlans`, `trunk_remove_vlans`, `trunk_set_vlans` |
 | Incremental port patching | `apply_device_config()` with `ports=` |
 | Full device config apply | `apply_device_config(desired, check_mode=False)` |
 | Ansible standalone plugin | `ansible/` — zero subprocess, direct import |
@@ -64,6 +62,8 @@ list are affected. Unlisted items are always left untouched.
   `PortConfig(port_id=5)`, and VLAN membership port `5` all refer to the same port.
 - VLAN 1 is protected and can never be deleted.
 - Port 6 (management uplink) can never be administratively disabled.
+- VLAN membership accepts both VLAN-centric and port-centric input. Both are
+  translated into the same canonical membership engine before planning.
 
 ### VLAN Membership Policy
 
@@ -80,44 +80,126 @@ Potentially destructive or ambiguous VLAN membership changes are policy-gated:
 
 ---
 
-## Python API
+## Python Usage
+
+### Read-Only Example
 
 ```python
 from napalm_jtcom.driver import JTComDriver
-from napalm_jtcom.model.config import DeviceConfig
-from napalm_jtcom.model.vlan import VlanConfig
-from napalm_jtcom.model.port import PortConfig
 
 driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
 driver.open()
 
-result = driver.apply_device_config(
-    DeviceConfig(
-        vlans={
-            10: VlanConfig(vlan_id=10, name="Management", untagged_ports=[1], state="present"),
-            99: VlanConfig(vlan_id=99, state="absent"),   # delete VLAN 99 if it exists
-        },
-        ports={
-            1: PortConfig(port_id=1, admin_up=True, speed_duplex="Auto", flow_control=False),
-        },
-    ),
-    check_mode=True,   # dry-run — pass False to apply
-)
-
-print(result)   # {"changed": True, "diff": {...}}
-driver.close()
+try:
+    print(driver.get_facts())
+    print(driver.get_interfaces())
+    print(driver.get_vlans())
+finally:
+    driver.close()
 ```
 
-See the `examples/` directory for additional runnable scripts (`get_facts.py`,
-`get_interfaces.py`, `get_vlans.py`, `apply_vlan.py`, `apply_device_config.py`,
-`toggle_port_admin.py`).
+### `set_vlans()` Example
+
+Use VLAN-centric input when the desired change is easiest to describe per VLAN.
+
+```python
+from napalm_jtcom.driver import JTComDriver
+from napalm_jtcom.model.vlan import VlanConfig
+
+driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
+driver.open()
+
+try:
+    result = driver.set_vlans(
+        {
+            10: VlanConfig(vlan_id=10, name="Management", state="present"),
+            20: VlanConfig(vlan_id=20, tagged_add=[7, 8], state="present"),
+            30: VlanConfig(vlan_id=30, untagged_add=[1, 2, 3], state="present"),
+            99: VlanConfig(vlan_id=99, state="absent"),
+        },
+        dry_run=True,
+    )
+    print(result)
+finally:
+    driver.close()
+```
+
+### `apply_device_config()` Example
+
+Use `apply_device_config()` when you want to combine VLAN changes, port admin
+changes, and port-centric VLAN membership in one plan.
+
+```python
+from napalm_jtcom.driver import JTComDriver
+from napalm_jtcom.model.config import DeviceConfig
+from napalm_jtcom.model.port import PortConfig
+from napalm_jtcom.model.vlan import VlanConfig
+
+driver = JTComDriver("192.0.2.1", "admin", "secret", optional_args={"verify_tls": False})
+driver.open()
+
+try:
+    result = driver.apply_device_config(
+        DeviceConfig(
+            vlans={
+                100: VlanConfig(vlan_id=100, name="Servers", state="present"),
+                200: VlanConfig(vlan_id=200, name="Voice", state="present"),
+            },
+            ports={
+                1: PortConfig(
+                    port_id=1,
+                    admin_up=True,
+                    access_vlan=100,
+                ),
+                7: PortConfig(
+                    port_id=7,
+                    native_vlan=100,
+                    trunk_add_vlans=[200, 300],
+                ),
+            },
+        ),
+        check_mode=True,
+    )
+    print(result["diff"])
+finally:
+    driver.close()
+```
+
+### Policy Override Example
+
+```python
+from napalm_jtcom.driver import JTComDriver
+from napalm_jtcom.model.vlan import VlanConfig
+
+driver = JTComDriver("192.0.2.1", "admin", "secret")
+driver.open()
+
+try:
+    result = driver.set_vlans(
+        {
+            20: VlanConfig(vlan_id=20, state="absent"),
+        },
+        dry_run=False,
+        allow_vlan_delete_in_use=True,
+    )
+    print(result["warnings"])
+finally:
+    driver.close()
+```
+
+Runnable scripts in [`examples/`](examples):
+- [`examples/get_facts.py`](examples/get_facts.py)
+- [`examples/get_interfaces.py`](examples/get_interfaces.py)
+- [`examples/get_vlans.py`](examples/get_vlans.py)
+- [`examples/apply_vlan.py`](examples/apply_vlan.py)
+- [`examples/apply_device_config.py`](examples/apply_device_config.py)
+- [`examples/toggle_port_admin.py`](examples/toggle_port_admin.py)
 
 ---
 
 ## Ansible
 
-Two integration paths are provided: a **standalone plugin** (no extra install step) and
-a **Galaxy collection** (shareable, versioned artifact).
+Two integration paths are provided: a **standalone plugin** and a **Galaxy collection**.
 
 ### Standalone plugin (`ansible/`)
 
@@ -145,10 +227,19 @@ Example task:
       10:
         name: Management
         state: present
+      20:
+        tagged_add: [7, 8]
+        state: present
+      30:
+        untagged_add: [1, 2, 3]
+        state: present
       99:
         state: absent
     ports:
-      1:
+      7:
+        native_vlan: 10
+        trunk_add_vlans: [20, 30]
+      8:
         admin_up: true
         speed_duplex: Auto
         flow_control: false
@@ -156,17 +247,18 @@ Example task:
 
 ### Galaxy Collection (`bronweg.cgiswitch`)
 
-A fully packaged Ansible Galaxy collection lives at `galaxy/bronweg/cgiswitch/`.
-FQCN: **`bronweg.cgiswitch.jtcom_config`**
+A packaged collection lives at `galaxy/bronweg/cgiswitch/`.
+FQCN: `bronweg.cgiswitch.jtcom_config`
 
-**Install:**
+Build and install:
 
 ```bash
+cd galaxy/bronweg/cgiswitch
+ansible-galaxy collection build --force
 ansible-galaxy collection install galaxy/bronweg/cgiswitch/bronweg-cgiswitch-0.1.0.tar.gz
-pip install napalm-jtcom
 ```
 
-**Example task:**
+Example task:
 
 ```yaml
 - name: Configure JTCom switch
@@ -178,15 +270,20 @@ pip install napalm-jtcom
     vlans:
       10:
         name: Management
-        untagged_ports: [1]
+        untagged_add: [1]
       20:
         name: Data
-        tagged_ports: [7]
-        untagged_ports: [1, 2, 3]
+        tagged_add: [7]
+      30:
+        name: Voice
+        untagged_add: [2, 3]
       99:
         state: absent
     ports:
-      1:
+      7:
+        native_vlan: 10
+        trunk_add_vlans: [20, 30]
+      8:
         admin_up: true
         speed: Auto
         flow_control: false
@@ -202,13 +299,16 @@ Both the standalone plugin and the collection support Ansible `--check` (dry-run
 | `safety_port_id` | configurable, default 6 | hardcoded 6, not exposed |
 | Port speed key | `speed_duplex` | `speed` |
 
-Inspect the collection module documentation:
+Collection examples:
+- [`galaxy/bronweg/cgiswitch/examples/vlan_create.yml`](galaxy/bronweg/cgiswitch/examples/vlan_create.yml)
+- [`galaxy/bronweg/cgiswitch/examples/vlan_delete.yml`](galaxy/bronweg/cgiswitch/examples/vlan_delete.yml)
+- [`galaxy/bronweg/cgiswitch/examples/port_patch.yml`](galaxy/bronweg/cgiswitch/examples/port_patch.yml)
+
+Inspect module documentation:
 
 ```bash
 ansible-doc bronweg.cgiswitch.jtcom_config
 ```
-
-See `galaxy/bronweg/cgiswitch/examples/` for ready-to-run collection playbooks.
 
 ---
 
