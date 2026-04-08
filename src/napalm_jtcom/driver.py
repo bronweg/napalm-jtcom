@@ -28,9 +28,11 @@ from napalm_jtcom.utils.vlan_diff import plan_vlan_changes
 from napalm_jtcom.utils.vlan_membership import (
     PortMembershipMap,
     VlanMembershipPlan,
+    build_current_per_port_from_jtcom_readback,
     build_current_per_port_from_vlans,
     diff_membership_maps,
     plan_vlan_membership_changes,
+    port_name_to_id,
     serialize_membership_map,
 )
 from napalm_jtcom.vendor.jtcom.endpoints import (
@@ -726,8 +728,9 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         """Fetch static VLANs and port-based VLAN settings, merge into a map.
 
         Reads the static VLAN list and per-port VLAN configuration from the
-        switch, then populates each :class:`VlanEntry` with its tagged and
-        untagged port memberships.
+        switch, normalizes JTCom backend trunk/access readback into canonical
+        per-port membership semantics, then materializes :class:`VlanEntry`
+        objects from that canonical state.
 
         Args:
             session: Active authenticated session.
@@ -742,20 +745,30 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         port_configs = parse_port_vlan_settings(port_html)
 
         vlan_map: dict[int, VlanEntry] = {v.vlan_id: v for v in vlans}
-        for pc in port_configs:
-            if pc.vlan_type.lower() == "access" and pc.access_vlan is not None:
-                entry = vlan_map.get(pc.access_vlan)
+        known_ports = [port_name_to_id(pc.port_name) for pc in port_configs]
+        current_per_port = build_current_per_port_from_jtcom_readback(
+            port_configs,
+            known_ports,
+        )
+        port_name_by_id = {
+            port_name_to_id(pc.port_name): pc.port_name
+            for pc in port_configs
+        }
+        for port_id, state in current_per_port.items():
+            port_name = port_name_by_id.get(port_id)
+            if port_name is None:
+                continue
+            untagged_vlan = state["untagged_vlan"]
+            if isinstance(untagged_vlan, int):
+                entry = vlan_map.get(untagged_vlan)
                 if entry is not None:
-                    entry.untagged_ports.append(pc.port_name)
-            elif pc.vlan_type.lower() == "trunk":
-                if pc.native_vlan is not None:
-                    entry = vlan_map.get(pc.native_vlan)
-                    if entry is not None:
-                        entry.untagged_ports.append(pc.port_name)
-                for vid in pc.permit_vlans:
+                    entry.untagged_ports.append(port_name)
+            tagged_vlans = state["tagged_vlans"]
+            if isinstance(tagged_vlans, set):
+                for vid in sorted(tagged_vlans):
                     entry = vlan_map.get(vid)
                     if entry is not None:
-                        entry.tagged_ports.append(pc.port_name)
+                        entry.tagged_ports.append(port_name)
         return vlan_map
 
     def _read_current_state(

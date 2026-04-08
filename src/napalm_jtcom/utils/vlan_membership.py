@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal, TypedDict
 
-from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
+from napalm_jtcom.model.vlan import VlanConfig, VlanEntry, VlanPortConfig
 
 PortMode = Literal["access", "trunk", "none"]
 BackendPortMode = Literal["access", "trunk"]
@@ -355,11 +355,12 @@ def build_current_per_port_from_vlans(
 
     for vlan_id, entry in sorted(vlans.items()):
         for port_name in entry.untagged_ports:
-            port_id = _port_name_to_id(port_name)
-            if port_id is None:
+            try:
+                port_id = port_name_to_id(port_name)
+            except ValueError:
                 raise ValueError(
                     f"Cannot parse untagged port name {port_name!r} in VLAN {vlan_id}"
-                )
+                ) from None
             current.setdefault(port_id, make_port_state())
             state = current[port_id]
             existing = _untagged_vlan(state)
@@ -371,11 +372,59 @@ def build_current_per_port_from_vlans(
             state["untagged_vlan"] = vlan_id
 
         for port_name in entry.tagged_ports:
-            port_id = _port_name_to_id(port_name)
-            if port_id is None:
-                raise ValueError(f"Cannot parse tagged port name {port_name!r} in VLAN {vlan_id}")
+            try:
+                port_id = port_name_to_id(port_name)
+            except ValueError:
+                raise ValueError(
+                    f"Cannot parse tagged port name {port_name!r} in VLAN {vlan_id}"
+                ) from None
             current.setdefault(port_id, make_port_state())
             _tagged_vlans(current[port_id]).add(vlan_id)
+
+    return current
+
+
+def build_current_per_port_from_jtcom_readback(
+    port_configs: Iterable[VlanPortConfig],
+    known_ports: Iterable[int],
+) -> PortMembershipMap:
+    """Build canonical current membership from JTCom backend port readback.
+
+    JTCom backend trunk readback is expressed as ``native_vlan`` plus
+    ``permit_vlans`` where ``permit_vlans`` includes ``native_vlan``.
+    This helper normalizes that backend representation into canonical on-wire
+    semantics via :func:`jtcom_to_canonical_port_vlan_state`.
+    """
+    current: PortMembershipMap = {port_id: make_port_state() for port_id in known_ports}
+
+    for backend_port in port_configs:
+        try:
+            port_id = port_name_to_id(backend_port.port_name)
+        except ValueError:
+            raise ValueError(
+                f"Cannot parse backend port name {backend_port.port_name!r}"
+            ) from None
+        backend_mode = backend_port.vlan_type.lower()
+        if backend_mode == "access":
+            backend_state: JTComPortVlanState = {
+                "mode": "access",
+                "access_vlan": backend_port.access_vlan,
+                "native_vlan": None,
+                "permit_vlans": [],
+            }
+        elif backend_mode == "trunk":
+            backend_state = {
+                "mode": "trunk",
+                "access_vlan": None,
+                "native_vlan": backend_port.native_vlan,
+                "permit_vlans": list(backend_port.permit_vlans),
+            }
+        else:
+            raise ValueError(
+                f"Unsupported JTCom backend VLAN mode {backend_port.vlan_type!r} "
+                f"for port {backend_port.port_name!r}"
+            )
+        current[port_id] = jtcom_to_canonical_port_vlan_state(backend_state)
 
     return current
 
@@ -831,9 +880,14 @@ def _tagged_vlans(state: PortMembershipState) -> set[int]:
     return value
 
 
-def _port_name_to_id(name: str) -> int | None:
-    """Convert ``"Port N"`` to its 1-based port ID."""
+def port_name_to_id(name: str) -> int:
+    """Convert a JTCom-style port label into the canonical 1-based port ID.
+
+    This helper converts labels like ``"Port 5"`` into the project-standard
+    1-based port IDs used throughout the canonical/domain model. Callers must
+    use this helper instead of ad hoc parsing.
+    """
     parts = name.rsplit(" ", 1)
-    if len(parts) == 2 and parts[1].isdigit():
+    if len(parts) == 2 and parts[0] == "Port" and parts[1].isdigit():
         return int(parts[1])
-    return None
+    raise ValueError(f"Invalid JTCom port name {name!r}; expected 'Port N'")

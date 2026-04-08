@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from napalm_jtcom.model.port import PortConfig, PortSettings
 from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
+from napalm_jtcom.utils.vlan_membership import port_name_to_id
 
 logger = logging.getLogger(__name__)
 
@@ -48,17 +49,17 @@ class DeviceConfig:
         for vid, entry in current_vlans.items():
             tagged: list[int] = []
             for name in entry.tagged_ports:
-                port_id = _port_name_to_id(name)
-                if port_id is not None:
+                try:
+                    port_id = port_name_to_id(name)
                     tagged.append(port_id)
-                else:
+                except ValueError:
                     logger.warning("Skipping unparseable tagged port name %r in VLAN %d", name, vid)
             untagged: list[int] = []
             for name in entry.untagged_ports:
-                port_id = _port_name_to_id(name)
-                if port_id is not None:
+                try:
+                    port_id = port_name_to_id(name)
                     untagged.append(port_id)
-                else:
+                except ValueError:
                     logger.warning(
                         "Skipping unparseable untagged port name %r in VLAN %d", name, vid
                     )
@@ -79,11 +80,3 @@ class DeviceConfig:
             )
 
         return cls(vlans=vlans, ports=ports)
-
-
-def _port_name_to_id(name: str) -> int | None:
-    """Convert ``"Port N"`` to its 1-based port ID, or ``None`` if unparseable."""
-    parts = name.rsplit(" ", 1)
-    if len(parts) == 2 and parts[1].isdigit():
-        return int(parts[1])
-    return None
