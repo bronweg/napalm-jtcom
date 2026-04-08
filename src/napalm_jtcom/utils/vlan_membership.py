@@ -1,4 +1,4 @@
-"""Canonical VLAN membership semantics and planning helpers.
+"""Canonical VLAN membership semantics, policy, and conversion helpers.
 
 Canonical truth in this module is the on-wire VLAN membership semantics for a
 port:
@@ -14,6 +14,16 @@ JTCom CGI trunk state:
 - therefore backend readback must be normalized before it becomes canonical
 
 Port IDs are 1-based everywhere in the domain model and planner.
+
+Architecture summary:
+
+- canonical current/desired state uses ``untagged_vlan`` + ``tagged_vlans``
+- Step 4 policy operates only on canonical state
+- JTCom backend state uses ``access_vlan`` or ``native_vlan`` + ``permit_vlans``
+- canonical -> JTCom compilation happens only via
+  :func:`canonical_to_jtcom_port_vlan_state`
+- JTCom readback -> canonical normalization happens only via
+  :func:`jtcom_to_canonical_port_vlan_state`
 """
 
 from __future__ import annotations
@@ -435,11 +445,12 @@ def plan_vlan_membership_changes(
     allow_vlan_delete_in_use: bool = False,
     check_mode: bool = False,
 ) -> VlanMembershipPlan:
-    """Apply VLAN membership operations in memory and produce a device intent.
+    """Apply VLAN membership operations in memory and produce a canonical plan.
 
     The engine starts from *current_per_port*, applies every present
-    :class:`VlanConfig` operation via ``normalized_membership()``, and never
-    talks to the device during planning.
+    :class:`VlanConfig` operation via ``normalized_membership()``, runs Step 4
+    policy checks on canonical state, and never talks to the device during
+    planning.
     """
     current = copy_membership_map(current_per_port)
     desired = copy_membership_map(current_per_port)
@@ -524,7 +535,7 @@ def detect_mode_change_warnings(
     current_per_port: PortMembershipMap,
     desired_per_port: PortMembershipMap,
 ) -> list[dict[str, Any]]:
-    """Return dangerous access↔trunk transitions."""
+    """Return dangerous access/trunk transitions from canonical state."""
     warnings: list[dict[str, Any]] = []
     for port_id in sorted(set(current_per_port) | set(desired_per_port)):
         current_state = current_per_port.get(port_id, make_port_state())
@@ -553,7 +564,7 @@ def detect_untagged_move_warnings(
     current_per_port: PortMembershipMap,
     desired_per_port: PortMembershipMap,
 ) -> list[dict[str, Any]]:
-    """Return untagged/native VLAN moves that require explicit policy override."""
+    """Return canonical untagged/native VLAN moves requiring explicit override."""
     warnings: list[dict[str, Any]] = []
     for port_id in sorted(set(current_per_port) | set(desired_per_port)):
         current_vlan = _untagged_vlan(current_per_port.get(port_id, make_port_state()))
@@ -581,7 +592,7 @@ def detect_vlan_delete_in_use_warnings(
     desired_per_port: PortMembershipMap,
     vlan_configs: Iterable[VlanConfig],
 ) -> list[dict[str, Any]]:
-    """Return absent VLANs still referenced in the effective desired state."""
+    """Return absent VLANs still referenced in effective canonical state."""
     absent_vlans = sorted({cfg.vlan_id for cfg in vlan_configs if cfg.state == "absent"})
     warnings: list[dict[str, Any]] = []
     for vlan_id in absent_vlans:
@@ -612,7 +623,7 @@ def apply_mode_none_fallback(
     desired_per_port: PortMembershipMap,
     candidate_port_ids: Iterable[int],
 ) -> list[dict[str, Any]]:
-    """Map desired mode ``none`` ports to access VLAN 1 and return warnings."""
+    """Map canonical empty port state to VLAN 1 fallback and return warnings."""
     warnings: list[dict[str, Any]] = []
     for port_id in sorted(set(candidate_port_ids)):
         state = desired_per_port.get(port_id, make_port_state())

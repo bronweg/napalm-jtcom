@@ -115,7 +115,8 @@ def vlan_set_port(
         vlan_type: ``"access"`` or ``"trunk"`` (case-insensitive).
         access_vlan: VLAN ID for Access mode (ignored in Trunk mode).
         native_vlan: Native VLAN ID for Trunk mode (ignored in Access mode).
-        permit_vlans: Tagged VLAN IDs for Trunk mode (non-native only).
+        permit_vlans: Full JTCom trunk permit list. On JTCom this includes
+            ``native_vlan``.
 
     Raises:
         ValueError: If *port_ids* is empty or *vlan_type* is invalid.

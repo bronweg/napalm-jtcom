@@ -1,0 +1,23 @@
+---
+- name: Configure a trunk port on JTCom switch
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    switch_host: 192.0.2.1
+    switch_user: "{{ lookup('env', 'SWITCH_USER') | default('admin') }}"
+    switch_pass: "{{ lookup('env', 'SWITCH_PASS') }}"
+
+  tasks:
+    - name: Put port 5 into trunk mode with native VLAN 10
+      bronweg.cgiswitch.jtcom_config:
+        host: "{{ switch_host }}"
+        username: "{{ switch_user }}"
+        password: "{{ switch_pass }}"
+        verify_tls: false
+        allow_port_mode_change: true
+        ports:
+          5:
+            native_vlan: 10
+            trunk_set_vlans: [20, 30]
