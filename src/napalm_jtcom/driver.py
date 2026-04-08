@@ -89,6 +89,10 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         self._allow_port_mode_change: bool = bool(
             self.optional_args.get("allow_port_mode_change", False)
         )
+        self._allow_untagged_move: bool = bool(
+            self.optional_args.get("allow_untagged_move", False)
+        )
+        self._force_delete_vlan: bool = bool(self.optional_args.get("force_delete_vlan", False))
 
         logger.debug(
             "JTComDriver initialised: host=%s port=%d user=%s",
@@ -252,6 +256,8 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         *,
         dry_run: bool = False,
         allow_port_mode_change: bool | None = None,
+        allow_untagged_move: bool | None = None,
+        force_delete_vlan: bool | None = None,
     ) -> dict[str, Any]:
         """Apply an incremental VLAN change plan to the switch.
 
@@ -270,6 +276,10 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
                 applying anything to the switch.
             allow_port_mode_change: Override ``optional_args["allow_port_mode_change"]``
                 for this call.  ``False`` blocks access↔trunk transitions.
+            allow_untagged_move: Override ``optional_args["allow_untagged_move"]``.
+                ``False`` blocks untagged/native VLAN moves.
+            force_delete_vlan: Override ``optional_args["force_delete_vlan"]``.
+                ``True`` allows auto-detaching VLANs before deletion.
 
         Returns:
             A dict with keys:
@@ -299,6 +309,8 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             desired_vlans,
             check_mode=dry_run,
             allow_port_mode_change=allow_port_mode_change,
+            allow_untagged_move=allow_untagged_move,
+            force_delete_vlan=force_delete_vlan,
         )
 
         result: dict[str, Any] = {
@@ -430,6 +442,8 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         *,
         check_mode: bool = False,
         backup_before_change: bool | None = None,
+        allow_untagged_move: bool | None = None,
+        force_delete_vlan: bool | None = None,
     ) -> dict[str, Any]:
         """Apply an incremental device configuration to the switch idempotently.
 
@@ -446,6 +460,8 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             check_mode: If ``True``, return the plan without applying anything.
             backup_before_change: Override the ``backup_before_change`` optional
                 arg.  ``None`` means use the optional_args value (default ``True``).
+            allow_untagged_move: Override ``optional_args["allow_untagged_move"]``.
+            force_delete_vlan: Override ``optional_args["force_delete_vlan"]``.
 
         Returns:
             A dict with keys:
@@ -496,6 +512,8 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             desired_plan_n.vlans,
             check_mode=check_mode,
             allow_port_mode_change=None,
+            allow_untagged_move=allow_untagged_move,
+            force_delete_vlan=force_delete_vlan,
         )
         if membership_plan.changed_ports or membership_plan.warnings:
             diff["vlan_membership"] = {
@@ -606,6 +624,8 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         *,
         check_mode: bool,
         allow_port_mode_change: bool | None,
+        allow_untagged_move: bool | None,
+        force_delete_vlan: bool | None,
     ) -> VlanMembershipPlan:
         """Build a VLAN membership plan from current switch state."""
         known_ports = [settings.port_id for settings in current_ports]
@@ -615,10 +635,16 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             if allow_port_mode_change is None
             else allow_port_mode_change
         )
+        allow_move = (
+            self._allow_untagged_move if allow_untagged_move is None else allow_untagged_move
+        )
+        force_delete = self._force_delete_vlan if force_delete_vlan is None else force_delete_vlan
         return plan_vlan_membership_changes(
             current_per_port,
             desired_vlans.values(),
             allow_port_mode_change=allow,
+            allow_untagged_move=allow_move,
+            force_delete_vlan=force_delete,
             check_mode=check_mode,
         )
 

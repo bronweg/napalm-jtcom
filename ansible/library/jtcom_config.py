@@ -53,6 +53,18 @@ options:
     description: Allow VLAN membership operations to change a port between access and trunk mode.
     type: bool
     default: false
+  allow_untagged_move:
+    description: >
+      Allow destructive untagged/native VLAN moves. By default, changing a port
+      from one untagged/native VLAN to another fails in apply mode.
+    type: bool
+    default: false
+  force_delete_vlan:
+    description: >
+      Allow deleting VLANs still referenced by ports by auto-detaching those
+      ports first. This is a destructive override.
+    type: bool
+    default: false
   vlans:
     description: >
       Incremental VLAN changes, keyed by VLAN ID (string or int).
@@ -119,6 +131,17 @@ EXAMPLES = r"""
       8:
         native_vlan: 10
         trunk_set_vlans: [20, 30]
+    allow_untagged_move: true
+
+- name: Force-delete a VLAN after detaching it from ports
+  jtcom_config:
+    host: 192.0.2.1
+    username: "{{ jtcom_user }}"
+    password: "{{ jtcom_pass }}"
+    vlans:
+      20:
+        state: absent
+    force_delete_vlan: true
 """
 
 RETURN = r"""
@@ -161,6 +184,8 @@ def main() -> None:
             backup_before_change=dict(type="bool", default=True),
             safety_port_id=dict(type="int", default=6),
             allow_port_mode_change=dict(type="bool", default=False),
+            allow_untagged_move=dict(type="bool", default=False),
+            force_delete_vlan=dict(type="bool", default=False),
             vlans=dict(type="dict"),
             ports=dict(type="dict"),
         ),

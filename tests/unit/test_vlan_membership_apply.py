@@ -14,9 +14,10 @@ from napalm_jtcom.driver import JTComDriver
 from napalm_jtcom.model.port import PortSettings
 from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
 from napalm_jtcom.utils.vlan_membership import (
+    VlanDeleteInUseError,
     VlanMembershipModeChangeError,
     VlanMembershipPlan,
-    VlanMembershipUnsupportedModeError,
+    VlanMembershipUntaggedMoveError,
     build_current_per_port_from_vlans,
     build_desired_port_vlan,
     make_port_state,
@@ -52,7 +53,11 @@ def test_tagged_set_replaces_vlan_dimension_only() -> None:
 
 def test_untagged_add_assigns_native_vlan() -> None:
     current = {3: make_port_state(untagged_vlan=10)}
-    plan = plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20, untagged_add=[3])])
+    plan = plan_vlan_membership_changes(
+        current,
+        [VlanConfig(vlan_id=20, untagged_add=[3])],
+        allow_untagged_move=True,
+    )
     assert plan.desired_per_port[3]["untagged_vlan"] == 20
 
 
@@ -63,7 +68,8 @@ def test_untagged_remove_clears_native_if_matching() -> None:
         [VlanConfig(vlan_id=20, untagged_remove=[3])],
         check_mode=True,
     )
-    assert plan.desired_per_port[3]["untagged_vlan"] is None
+    assert plan.desired_per_port[3]["untagged_vlan"] == 1
+    assert plan.warnings[0]["type"] == "mode_none_mapped_to_vlan1"
 
 
 def test_tagged_untagged_same_vlan_is_auto_normalized() -> None:
@@ -185,21 +191,24 @@ def test_check_mode_warns_instead_of_failing_on_desired_mode_none() -> None:
         [VlanConfig(vlan_id=20, untagged_remove=[3])],
         check_mode=True,
     )
-    assert plan.desired_port_vlan[3]["mode"] == "none"
-    assert plan.warnings[0]["type"] == "unsupported_vlan_port_mode"
+    assert plan.desired_port_vlan[3]["mode"] == "access"
+    assert plan.desired_per_port[3]["untagged_vlan"] == 1
+    assert plan.warnings[0]["type"] == "mode_none_mapped_to_vlan1"
     assert plan.warnings[0]["port_id"] == 3
-    assert "access/trunk" in plan.warnings[0]["hint"]
+    assert plan.warnings[0]["mapped_vlan"] == 1
 
 
-def test_apply_mode_fails_on_desired_mode_none() -> None:
+def test_apply_mode_maps_desired_mode_none_to_vlan1() -> None:
     current = {3: make_port_state(untagged_vlan=20)}
-    with pytest.raises(VlanMembershipUnsupportedModeError) as exc_info:
-        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20, untagged_remove=[3])])
-    assert exc_info.value.warnings[0]["port_id"] == 3
-    assert "cannot be applied safely" in str(exc_info.value)
+    plan = plan_vlan_membership_changes(
+        current,
+        [VlanConfig(vlan_id=20, untagged_remove=[3])],
+    )
+    assert plan.desired_port_vlan[3] == {"mode": "access", "native_vlan": 1, "permit_vlans": [1]}
+    assert plan.warnings[0]["type"] == "mode_none_mapped_to_vlan1"
 
 
-def test_set_vlans_mode_none_failure_happens_before_device_mutation(
+def test_set_vlans_mode_none_maps_to_vlan1_before_apply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     driver = JTComDriver("192.0.2.1", "admin", "admin")
@@ -217,11 +226,105 @@ def test_set_vlans_mode_none_failure_happens_before_device_mutation(
         lambda _session: (current_vlans, current_ports),
     )
 
-    with pytest.raises(VlanMembershipUnsupportedModeError):
-        driver.set_vlans({20: VlanConfig(vlan_id=20, untagged_remove=[4])})
+    result = driver.set_vlans(
+        {20: VlanConfig(vlan_id=20, untagged_remove=[4])},
+        dry_run=True,
+    )
 
-    session.post.assert_not_called()
+    assert result["after"][4] == {"untagged_vlan": 1, "tagged_vlans": []}
+    assert result["warnings"][0]["type"] == "mode_none_mapped_to_vlan1"
     session.download_config_backup.assert_not_called()
+
+
+def test_untagged_move_apply_fails_by_default() -> None:
+    current = {3: make_port_state(untagged_vlan=20)}
+    with pytest.raises(VlanMembershipUntaggedMoveError) as exc_info:
+        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=30, untagged_add=[3])])
+    assert exc_info.value.warnings[0]["type"] == "untagged_move"
+    assert exc_info.value.warnings[0]["current_untagged_vlan"] == 20
+    assert exc_info.value.warnings[0]["desired_untagged_vlan"] == 30
+
+
+def test_untagged_move_check_mode_warns() -> None:
+    current = {3: make_port_state(untagged_vlan=20)}
+    plan = plan_vlan_membership_changes(
+        current,
+        [VlanConfig(vlan_id=30, untagged_add=[3])],
+        check_mode=True,
+    )
+    assert plan.warnings[0]["type"] == "untagged_move"
+    assert plan.desired_per_port[3]["untagged_vlan"] == 30
+
+
+def test_untagged_move_allowed_with_flag() -> None:
+    current = {3: make_port_state(untagged_vlan=20)}
+    plan = plan_vlan_membership_changes(
+        current,
+        [VlanConfig(vlan_id=30, untagged_add=[3])],
+        allow_untagged_move=True,
+    )
+    assert plan.desired_per_port[3]["untagged_vlan"] == 30
+    assert plan.warnings[0]["type"] == "untagged_move"
+
+
+def test_native_vlan_move_on_trunk_fails_by_default() -> None:
+    current = {5: make_port_state(untagged_vlan=10, tagged_vlans={20})}
+    with pytest.raises(VlanMembershipUntaggedMoveError):
+        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=30, untagged_add=[5])])
+
+
+def test_delete_vlan_in_use_fails_by_default() -> None:
+    current = {3: make_port_state(untagged_vlan=20)}
+    with pytest.raises(VlanDeleteInUseError) as exc_info:
+        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20, state="absent")])
+    assert exc_info.value.warnings[0]["type"] == "vlan_delete_in_use"
+    assert exc_info.value.warnings[0]["affected_ports_untagged"] == [3]
+
+
+def test_delete_vlan_in_use_check_mode_warns() -> None:
+    current = {3: make_port_state(untagged_vlan=20)}
+    plan = plan_vlan_membership_changes(
+        current,
+        [VlanConfig(vlan_id=20, state="absent")],
+        check_mode=True,
+    )
+    assert plan.warnings[0]["type"] == "vlan_delete_in_use"
+    assert plan.changed_ports == []
+
+
+def test_force_delete_vlan_detaches_and_falls_back_to_vlan1() -> None:
+    current = {
+        3: make_port_state(untagged_vlan=20),
+        5: make_port_state(untagged_vlan=10, tagged_vlans={20, 30}),
+    }
+    plan = plan_vlan_membership_changes(
+        current,
+        [VlanConfig(vlan_id=20, state="absent")],
+        force_delete_vlan=True,
+        check_mode=True,
+    )
+    assert plan.desired_per_port[3]["untagged_vlan"] == 1
+    assert plan.desired_per_port[5]["untagged_vlan"] == 10
+    assert plan.desired_per_port[5]["tagged_vlans"] == {30}
+    assert [warning["type"] for warning in plan.warnings][:2] == [
+        "vlan_delete_in_use",
+        "mode_none_mapped_to_vlan1",
+    ]
+
+
+def test_delete_unused_vlan_is_allowed_without_warning() -> None:
+    current = {3: make_port_state(untagged_vlan=10)}
+    plan = plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20, state="absent")])
+    assert plan.warnings == []
+    assert plan.changed_ports == []
+
+
+def test_mode_none_fallback_still_respects_trunk_to_access_protection() -> None:
+    current = {5: make_port_state(tagged_vlans={20})}
+    with pytest.raises(VlanMembershipModeChangeError) as exc_info:
+        plan_vlan_membership_changes(current, [VlanConfig(vlan_id=20, tagged_remove=[5])])
+    assert exc_info.value.warnings[0]["current_mode"] == "trunk"
+    assert exc_info.value.warnings[0]["desired_mode"] == "access"
 
 
 @pytest.mark.parametrize(

@@ -98,6 +98,8 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             "backup_before_change": p.get("backup_before_change", True),
             "safety_port_id": p.get("safety_port_id", 6),
             "allow_port_mode_change": p.get("allow_port_mode_change", False),
+            "allow_untagged_move": p.get("allow_untagged_move", False),
+            "force_delete_vlan": p.get("force_delete_vlan", False),
         }
         if p.get("port") is not None:
             optional_args["port"] = p["port"]

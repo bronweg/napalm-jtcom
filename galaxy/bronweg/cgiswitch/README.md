@@ -29,6 +29,15 @@ Idempotent, diff-aware PATCH-style configuration of VLANs and ports.
 - Port 6 (management uplink) cannot be administratively disabled
 - VLAN 1 cannot be deleted
 
+VLAN membership policy:
+
+- Untagged/native VLAN moves fail by default; use `allow_untagged_move: true`
+  only when the move is intended.
+- Deleting a VLAN still used by ports fails by default; use
+  `force_delete_vlan: true` to auto-detach affected ports before deletion.
+- If a changed port would otherwise have no VLAN membership, it is mapped to
+  access VLAN 1 and a `mode_none_mapped_to_vlan1` warning is returned.
+
 ```yaml
 - name: Configure switch
   bronweg.cgiswitch.jtcom_config:

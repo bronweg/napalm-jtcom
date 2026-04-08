@@ -65,6 +65,18 @@ list are affected. Unlisted items are always left untouched.
 - VLAN 1 is protected and can never be deleted.
 - Port 6 (management uplink) can never be administratively disabled.
 
+### VLAN Membership Policy
+
+Potentially destructive or ambiguous VLAN membership changes are policy-gated:
+
+- Untagged/native VLAN moves fail by default. Set `allow_untagged_move=True`
+  only when moving a port from one untagged/native VLAN to another is intended.
+- Deleting a VLAN that is still tagged or untagged on any port fails by default.
+  Set `force_delete_vlan=True` to auto-detach affected ports before deletion.
+- If a changed port would otherwise end up with no VLAN membership, the policy
+  layer maps it explicitly to access VLAN 1 and emits a structured
+  `mode_none_mapped_to_vlan1` warning.
+
 ---
 
 ## Python API
