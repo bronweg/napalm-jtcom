@@ -80,7 +80,10 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             "backup_before_change": p.get("backup_before_change", True),
             "safety_port_id": 6,
             "allow_port_mode_change": p.get("allow_port_mode_change", False),
+            "allow_untagged_move": p.get("allow_untagged_move", False),
         }
+        if "allow_vlan_delete_in_use" in p:
+            optional_args["allow_vlan_delete_in_use"] = p.get("allow_vlan_delete_in_use")
 
         try:
             driver = JTComDriver(

@@ -225,3 +225,110 @@ def test_driver_dual_syntax_conflict_fails_before_mutation(
 
     session.post.assert_not_called()
     session.download_config_backup.assert_not_called()
+
+
+def test_port_centric_untagged_move_fails_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    driver._session = MagicMock()
+    current_vlans = {
+        20: VlanEntry(vlan_id=20, name="v20", untagged_ports=["Port 5"]),
+        30: VlanEntry(vlan_id=30, name="v30"),
+    }
+    current_ports = [PortSettings(port_id=5, name="Port 5", admin_up=True)]
+    monkeypatch.setattr(
+        driver,
+        "_read_current_state",
+        lambda _session: (current_vlans, current_ports),
+    )
+
+    with pytest.raises(ValueError, match="Untagged/native VLAN move blocked"):
+        driver.apply_device_config(
+            DeviceConfig(ports={5: PortConfig(port_id=5, access_vlan=30)})
+        )
+
+
+def test_port_centric_untagged_move_allowed_with_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = JTComDriver(
+        "192.0.2.1",
+        "admin",
+        "admin",
+        optional_args={"allow_untagged_move": True},
+    )
+    driver._session = MagicMock()
+    current_vlans = {
+        20: VlanEntry(vlan_id=20, name="v20", untagged_ports=["Port 5"]),
+        30: VlanEntry(vlan_id=30, name="v30"),
+    }
+    current_ports = [PortSettings(port_id=5, name="Port 5", admin_up=True)]
+    monkeypatch.setattr(
+        driver,
+        "_read_current_state",
+        lambda _session: (current_vlans, current_ports),
+    )
+
+    result = driver.apply_device_config(
+        DeviceConfig(ports={5: PortConfig(port_id=5, access_vlan=30)}),
+        check_mode=True,
+    )
+
+    assert result["changed_ports"] == [5]
+    assert result["warnings"][0]["type"] == "untagged_move"
+    assert result["after"][5]["untagged_vlan"] == 30
+
+
+def test_allow_vlan_delete_in_use_does_not_suppress_dual_syntax_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = JTComDriver(
+        "192.0.2.1",
+        "admin",
+        "admin",
+        optional_args={"allow_vlan_delete_in_use": True},
+    )
+    driver._session = MagicMock()
+    current_vlans = {20: VlanEntry(vlan_id=20, name="v20")}
+    current_ports = [PortSettings(port_id=5, name="Port 5", admin_up=True)]
+    monkeypatch.setattr(
+        driver,
+        "_read_current_state",
+        lambda _session: (current_vlans, current_ports),
+    )
+
+    with pytest.raises(DualSyntaxConflictError):
+        driver.apply_device_config(
+            DeviceConfig(
+                vlans={20: VlanConfig(vlan_id=20, state="absent")},
+                ports={5: PortConfig(port_id=5, trunk_add_vlans=[20])},
+            )
+        )
+
+
+def test_allow_untagged_move_does_not_suppress_dual_syntax_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = JTComDriver(
+        "192.0.2.1",
+        "admin",
+        "admin",
+        optional_args={"allow_untagged_move": True},
+    )
+    driver._session = MagicMock()
+    current_vlans = {10: VlanEntry(vlan_id=10, name="v10"), 20: VlanEntry(vlan_id=20, name="v20")}
+    current_ports = [PortSettings(port_id=5, name="Port 5", admin_up=True)]
+    monkeypatch.setattr(
+        driver,
+        "_read_current_state",
+        lambda _session: (current_vlans, current_ports),
+    )
+
+    with pytest.raises(DualSyntaxConflictError):
+        driver.apply_device_config(
+            DeviceConfig(
+                vlans={10: VlanConfig(vlan_id=10, untagged_add=[5])},
+                ports={5: PortConfig(port_id=5, access_vlan=20)},
+            )
+        )

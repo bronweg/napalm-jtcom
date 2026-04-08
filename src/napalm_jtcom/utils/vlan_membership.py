@@ -16,6 +16,7 @@ PortMode = Literal["access", "trunk", "none"]
 PortMembershipState = dict[str, int | set[int] | None]
 PortMembershipMap = dict[int, PortMembershipState]
 NullablePortSet = set[int] | None
+DEFAULT_FALLBACK_VLAN_ID = 1
 
 
 class PortVlanIntent(TypedDict):
@@ -26,9 +27,12 @@ class PortVlanIntent(TypedDict):
     permit_vlans: list[int]
 
 _MODE_CHANGE_HINT = "Set allow_port_mode_change=true to allow this access/trunk transition."
+_UNTAGGED_MOVE_HINT = "Set allow_untagged_move=True to allow this untagged/native VLAN move."
+_VLAN_DELETE_IN_USE_HINT = (
+    "Set allow_vlan_delete_in_use=True to detach this VLAN from affected ports before deletion."
+)
 _NONE_MODE_HINT = (
-    "JTCom CGI supports only access/trunk VLAN port modes; desired mode 'none' "
-    "cannot be applied safely."
+    "Policy fallback maps ports with no VLAN membership to access VLAN 1."
 )
 
 
@@ -60,6 +64,37 @@ class VlanMembershipUnsupportedModeError(ValueError):
             for w in warnings
         )
         super().__init__(f"Unsupported VLAN port mode requested: {details}")
+
+
+class VlanMembershipUntaggedMoveError(ValueError):
+    """Raised when an untagged/native VLAN move is blocked by policy."""
+
+    def __init__(self, warnings: list[dict[str, Any]]) -> None:
+        self.warnings = warnings
+        details = "; ".join(
+            (
+                f"port_id={w['port_id']} current_untagged_vlan={w['current_untagged_vlan']} "
+                f"desired_untagged_vlan={w['desired_untagged_vlan']}"
+            )
+            for w in warnings
+        )
+        super().__init__(f"Untagged/native VLAN move blocked: {details}. {_UNTAGGED_MOVE_HINT}")
+
+
+class VlanDeleteInUseError(ValueError):
+    """Raised when deleting a VLAN that is still referenced by ports is blocked."""
+
+    def __init__(self, warnings: list[dict[str, Any]]) -> None:
+        self.warnings = warnings
+        details = "; ".join(
+            (
+                f"vlan_id={w['vlan_id']} tagged={w['affected_ports_tagged']} "
+                f"untagged={w['affected_ports_untagged']}"
+            )
+            for w in warnings
+        )
+        super().__init__(f"VLAN delete blocked because VLAN is still in use: {details}. "
+                         f"{_VLAN_DELETE_IN_USE_HINT}")
 
 
 @dataclass
@@ -134,6 +169,8 @@ def plan_vlan_membership_changes(
     vlan_configs: Iterable[VlanConfig],
     *,
     allow_port_mode_change: bool = False,
+    allow_untagged_move: bool = False,
+    allow_vlan_delete_in_use: bool = False,
     check_mode: bool = False,
 ) -> VlanMembershipPlan:
     """Apply VLAN membership operations in memory and produce a device intent.
@@ -144,18 +181,37 @@ def plan_vlan_membership_changes(
     """
     current = copy_membership_map(current_per_port)
     desired = copy_membership_map(current_per_port)
+    configs = sorted(vlan_configs, key=lambda item: item.vlan_id)
 
-    for cfg in sorted(vlan_configs, key=lambda item: item.vlan_id):
+    for cfg in configs:
         if cfg.state != "present":
             continue
         _apply_vlan_config(desired, cfg)
 
     normalize_tagged_untagged_consistency(desired)
+    delete_in_use_warnings = detect_vlan_delete_in_use_warnings(desired, configs)
+    if delete_in_use_warnings and not allow_vlan_delete_in_use and not check_mode:
+        raise VlanDeleteInUseError(delete_in_use_warnings)
+    if allow_vlan_delete_in_use:
+        for warning in delete_in_use_warnings:
+            _detach_vlan(desired, int(warning["vlan_id"]))
+
+    untagged_move_warnings = detect_untagged_move_warnings(current, desired)
+    if untagged_move_warnings and not allow_untagged_move and not check_mode:
+        raise VlanMembershipUntaggedMoveError(untagged_move_warnings)
+
+    mode_none_warnings = apply_mode_none_fallback(desired, changed_ports(current, desired))
     desired_port_vlan = build_desired_port_vlan(desired)
     changed = changed_ports(current, desired)
     mode_change_warnings = detect_mode_change_warnings(current, desired)
     unsupported_mode_warnings = detect_unsupported_mode_warnings(desired_port_vlan, changed)
-    warnings = mode_change_warnings + unsupported_mode_warnings
+    warnings = (
+        delete_in_use_warnings
+        + untagged_move_warnings
+        + mode_none_warnings
+        + mode_change_warnings
+        + unsupported_mode_warnings
+    )
 
     if unsupported_mode_warnings and not check_mode:
         raise VlanMembershipUnsupportedModeError(unsupported_mode_warnings)
@@ -211,12 +267,108 @@ def detect_mode_change_warnings(
         if (current_mode, desired_mode) in {("access", "trunk"), ("trunk", "access")}:
             warnings.append(
                 {
+                    "type": "port_mode_change",
+                    "entity": "port",
                     "port_id": port_id,
+                    "vlan_id": None,
+                    "message": (
+                        f"Port {port_id} would change mode from {current_mode} to {desired_mode}."
+                    ),
                     "current_mode": current_mode,
                     "desired_mode": desired_mode,
                     "hint": _MODE_CHANGE_HINT,
                 }
             )
+    return warnings
+
+
+def detect_untagged_move_warnings(
+    current_per_port: PortMembershipMap,
+    desired_per_port: PortMembershipMap,
+) -> list[dict[str, Any]]:
+    """Return untagged/native VLAN moves that require explicit policy override."""
+    warnings: list[dict[str, Any]] = []
+    for port_id in sorted(set(current_per_port) | set(desired_per_port)):
+        current_vlan = _untagged_vlan(current_per_port.get(port_id, make_port_state()))
+        desired_vlan = _untagged_vlan(desired_per_port.get(port_id, make_port_state()))
+        if current_vlan is not None and desired_vlan is not None and current_vlan != desired_vlan:
+            warnings.append(
+                {
+                    "type": "untagged_move",
+                    "entity": "port",
+                    "port_id": port_id,
+                    "vlan_id": None,
+                    "message": (
+                        f"Port {port_id} would move untagged VLAN from "
+                        f"{current_vlan} to {desired_vlan}."
+                    ),
+                    "current_untagged_vlan": current_vlan,
+                    "desired_untagged_vlan": desired_vlan,
+                    "hint": _UNTAGGED_MOVE_HINT,
+                }
+            )
+    return warnings
+
+
+def detect_vlan_delete_in_use_warnings(
+    desired_per_port: PortMembershipMap,
+    vlan_configs: Iterable[VlanConfig],
+) -> list[dict[str, Any]]:
+    """Return absent VLANs still referenced in the effective desired state."""
+    absent_vlans = sorted({cfg.vlan_id for cfg in vlan_configs if cfg.state == "absent"})
+    warnings: list[dict[str, Any]] = []
+    for vlan_id in absent_vlans:
+        tagged_ports: list[int] = []
+        untagged_ports: list[int] = []
+        for port_id, state in sorted(desired_per_port.items()):
+            if vlan_id in _tagged_vlans(state):
+                tagged_ports.append(port_id)
+            if _untagged_vlan(state) == vlan_id:
+                untagged_ports.append(port_id)
+        if tagged_ports or untagged_ports:
+            warnings.append(
+                {
+                    "type": "vlan_delete_in_use",
+                    "entity": "vlan",
+                    "port_id": None,
+                    "vlan_id": vlan_id,
+                    "message": f"VLAN {vlan_id} is still in use.",
+                    "affected_ports_tagged": tagged_ports,
+                    "affected_ports_untagged": untagged_ports,
+                    "hint": _VLAN_DELETE_IN_USE_HINT,
+                }
+            )
+    return warnings
+
+
+def apply_mode_none_fallback(
+    desired_per_port: PortMembershipMap,
+    candidate_port_ids: Iterable[int],
+) -> list[dict[str, Any]]:
+    """Map desired mode ``none`` ports to access VLAN 1 and return warnings."""
+    warnings: list[dict[str, Any]] = []
+    for port_id in sorted(set(candidate_port_ids)):
+        state = desired_per_port.get(port_id, make_port_state())
+        if classify_port_mode(state) != "none":
+            continue
+        desired_per_port[port_id] = state
+        state["untagged_vlan"] = DEFAULT_FALLBACK_VLAN_ID
+        _tagged_vlans(state).clear()
+        warnings.append(
+            {
+                "type": "mode_none_mapped_to_vlan1",
+                "entity": "port",
+                "port_id": port_id,
+                "vlan_id": DEFAULT_FALLBACK_VLAN_ID,
+                "message": (
+                    f"Port {port_id} would otherwise have no VLAN membership and was "
+                    f"mapped to access VLAN {DEFAULT_FALLBACK_VLAN_ID}."
+                ),
+                "mapped_vlan": DEFAULT_FALLBACK_VLAN_ID,
+                "reason": "policy_default_vlan1_fallback",
+                "hint": _NONE_MODE_HINT,
+            }
+        )
     return warnings
 
 
@@ -232,7 +384,13 @@ def detect_unsupported_mode_warnings(
             warnings.append(
                 {
                     "type": "unsupported_vlan_port_mode",
+                    "entity": "port",
                     "port_id": port_id,
+                    "vlan_id": None,
+                    "message": (
+                        f"Port {port_id} resolved to unsupported VLAN mode "
+                        f"{intent['mode']}."
+                    ),
                     "desired_mode": "none",
                     "desired_state": {
                         "native_vlan": intent["native_vlan"],
@@ -242,6 +400,13 @@ def detect_unsupported_mode_warnings(
                 }
             )
     return warnings
+
+
+def _detach_vlan(per_port: PortMembershipMap, vlan_id: int) -> None:
+    for state in per_port.values():
+        _tagged_vlans(state).discard(vlan_id)
+        if _untagged_vlan(state) == vlan_id:
+            state["untagged_vlan"] = None
 
 
 def build_desired_port_vlan(per_port: PortMembershipMap) -> dict[int, PortVlanIntent]:
