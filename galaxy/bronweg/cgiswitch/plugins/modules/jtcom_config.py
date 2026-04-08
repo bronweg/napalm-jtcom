@@ -49,7 +49,7 @@ options:
       from one untagged/native VLAN to another fails in apply mode.
     type: bool
     default: false
-  force_delete_vlan:
+  allow_vlan_delete_in_use:
     description: >
       Allow deleting VLANs still referenced by ports by auto-detaching those
       ports first. This is a destructive override.
@@ -136,7 +136,7 @@ EXAMPLES = r"""
     vlans:
       20:
         state: absent
-    force_delete_vlan: true
+    allow_vlan_delete_in_use: true
 """
 
 RETURN = r"""
@@ -178,7 +178,7 @@ def main() -> None:
             backup_before_change=dict(type="bool", default=True),
             allow_port_mode_change=dict(type="bool", default=False),
             allow_untagged_move=dict(type="bool", default=False),
-            force_delete_vlan=dict(type="bool", default=False),
+            allow_vlan_delete_in_use=dict(type="bool", default=False),
             vlans=dict(type="dict"),
             ports=dict(type="dict"),
         ),

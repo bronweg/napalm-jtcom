@@ -280,14 +280,14 @@ def test_port_centric_untagged_move_allowed_with_flag(
     assert result["after"][5]["untagged_vlan"] == 30
 
 
-def test_force_delete_vlan_does_not_suppress_dual_syntax_conflict(
+def test_allow_vlan_delete_in_use_does_not_suppress_dual_syntax_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     driver = JTComDriver(
         "192.0.2.1",
         "admin",
         "admin",
-        optional_args={"force_delete_vlan": True},
+        optional_args={"allow_vlan_delete_in_use": True},
     )
     driver._session = MagicMock()
     current_vlans = {20: VlanEntry(vlan_id=20, name="v20")}

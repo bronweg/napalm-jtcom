@@ -25,7 +25,7 @@ These decisions are fixed for this step and must be implemented exactly as follo
 
 2) Delete VLAN that is still in use:
    - default: FAIL
-   - override flag: force_delete_vlan=True
+   - override flag: allow_vlan_delete_in_use=True
 
 3) Resulting mode == none:
    - automatically map to VLAN 1
@@ -90,7 +90,7 @@ NEW POLICY FLAGS
 Add the following explicit flags to the main apply/config path:
 
 - allow_untagged_move: bool = False
-- force_delete_vlan: bool = False
+- allow_vlan_delete_in_use: bool = False
 
 Do NOT add allow_mode_none.
 Mode none is handled by automatic VLAN 1 fallback in this step.
@@ -206,7 +206,7 @@ Deleting a VLAN that is still used by ports must no longer be ambiguous.
 
 Selected policy:
 - default: fail
-- override flag: force_delete_vlan=True
+- override flag: allow_vlan_delete_in_use=True
 
 Definition of "VLAN in use":
 A VLAN is considered in use if any port currently or finally references it as:
@@ -220,9 +220,9 @@ and it is still in use,
 then:
 - default apply: fail
 - check mode: warning
-- apply with force_delete_vlan=True: allowed
+- apply with allow_vlan_delete_in_use=True: allowed
 
-2) What does force_delete_vlan=True mean in this step?
+2) What does allow_vlan_delete_in_use=True mean in this step?
 It means:
 - the system is allowed to detach this VLAN from all affected ports automatically
 - then delete it
@@ -241,10 +241,10 @@ Each warning/error entry should include:
 - vlan_id
 - affected_ports_tagged
 - affected_ports_untagged
-- hint mentioning force_delete_vlan=True
+- hint mentioning allow_vlan_delete_in_use=True
 
 B) In default apply mode:
-- if any VLAN delete-in-use is detected and force_delete_vlan=False:
+- if any VLAN delete-in-use is detected and allow_vlan_delete_in_use=False:
     raise dedicated exception before mutation
 
 Recommended exception:
@@ -253,12 +253,12 @@ Recommended exception:
 C) In check mode:
 - warning only
 
-D) If force_delete_vlan=True:
+D) If allow_vlan_delete_in_use=True:
 - auto-detach this VLAN from all affected ports in the desired state before apply
 - then allow normal deletion to continue
 
 Important:
-This means the policy layer must modify the effective desired membership plan when force_delete_vlan=True.
+This means the policy layer must modify the effective desired membership plan when allow_vlan_delete_in_use=True.
 
 Recommended implementation approach:
 - before passing desired input into membership planning,
@@ -274,11 +274,11 @@ A) VLAN 20 absent, currently untagged on port 3
    - default apply: fail
 B) same in check mode:
    - warning
-C) same with force_delete_vlan=True:
+C) same with allow_vlan_delete_in_use=True:
    - auto detach and delete succeeds
 D) VLAN 20 absent, currently tagged on ports 5 and 6
    - default fail
-E) same with force_delete_vlan=True:
+E) same with allow_vlan_delete_in_use=True:
    - tagged membership removed and delete proceeds
 F) mixed case:
    - native on one port, tagged on another
@@ -382,7 +382,7 @@ This is not a separate flag; it is the principle behind the selected policy.
 It must be reflected consistently:
 
 - untagged move requires allow_untagged_move
-- delete VLAN in use requires force_delete_vlan
+- delete VLAN in use requires allow_vlan_delete_in_use
 - mode none is not allowed to remain empty; it is mapped explicitly to VLAN 1
 
 There must be no silent destructive operation in default apply mode except the explicitly chosen VLAN 1 fallback policy.
@@ -415,7 +415,7 @@ Required work:
 - destructive override flags must not be used as conflict-resolution flags
 
 Example:
-force_delete_vlan=True must not allow:
+allow_vlan_delete_in_use=True must not allow:
 - VLAN absent
 - port-centric trunk_add_vlans for same VLAN
 
@@ -423,7 +423,7 @@ That remains a hard conflict.
 
 Required tests:
 - existing dual syntax conflict tests continue passing
-- add at least one test proving force_delete_vlan does not suppress dual syntax conflict
+- add at least one test proving allow_vlan_delete_in_use does not suppress dual syntax conflict
 - add at least one test proving allow_untagged_move does not suppress dual syntax conflict
 
 PART 7 — IMPLEMENTATION STRATEGY
@@ -437,7 +437,7 @@ Recommended order:
    - detect delete-in-use
    - detect resulting mode == none before fallback
 4) Inject policy validation / transformation into driver before mutation
-5) For force_delete_vlan=True:
+5) For allow_vlan_delete_in_use=True:
    - augment canonical desired_vlans with detach operations before planning/apply
 6) For mode == none:
    - apply VLAN 1 fallback to desired_per_port before final intent/apply
@@ -449,7 +449,7 @@ PART 8 — ANSIBLE / USER-FACING API
 
 Update Ansible docs and module schema to support:
 - allow_untagged_move
-- force_delete_vlan
+- allow_vlan_delete_in_use
 
 Do NOT add allow_mode_none.
 
@@ -494,9 +494,9 @@ DELETE VLAN IN USE
 - tagged use
 - mixed use
 - unused VLAN delete
-- force_delete_vlan True path
+- allow_vlan_delete_in_use True path
 - check mode warning
-- dual syntax conflict still fails even with force_delete_vlan
+- dual syntax conflict still fails even with allow_vlan_delete_in_use
 
 MODE NONE -> VLAN 1
 - access port becomes none -> effective VLAN 1
@@ -530,7 +530,7 @@ Default behavior:
 
 Flags:
 - allow_untagged_move
-- force_delete_vlan
+- allow_vlan_delete_in_use
 
 Explain with examples.
 

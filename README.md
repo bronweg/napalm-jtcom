@@ -72,10 +72,11 @@ Potentially destructive or ambiguous VLAN membership changes are policy-gated:
 - Untagged/native VLAN moves fail by default. Set `allow_untagged_move=True`
   only when moving a port from one untagged/native VLAN to another is intended.
 - Deleting a VLAN that is still tagged or untagged on any port fails by default.
-  Set `force_delete_vlan=True` to auto-detach affected ports before deletion.
+  Set `allow_vlan_delete_in_use=True` to auto-detach affected ports before deletion.
 - If a changed port would otherwise end up with no VLAN membership, the policy
   layer maps it explicitly to access VLAN 1 and emits a structured
-  `mode_none_mapped_to_vlan1` warning.
+  `mode_none_mapped_to_vlan1` warning. This fallback can still trigger
+  access↔trunk protection if the effective result changes port mode.
 
 ---
 

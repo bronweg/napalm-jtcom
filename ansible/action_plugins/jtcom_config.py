@@ -99,8 +99,9 @@ class ActionModule(ActionBase):  # type: ignore[misc]
             "safety_port_id": p.get("safety_port_id", 6),
             "allow_port_mode_change": p.get("allow_port_mode_change", False),
             "allow_untagged_move": p.get("allow_untagged_move", False),
-            "force_delete_vlan": p.get("force_delete_vlan", False),
         }
+        if "allow_vlan_delete_in_use" in p:
+            optional_args["allow_vlan_delete_in_use"] = p.get("allow_vlan_delete_in_use")
         if p.get("port") is not None:
             optional_args["port"] = p["port"]
 
