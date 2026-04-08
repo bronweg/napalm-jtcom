@@ -58,13 +58,6 @@ class JTComPortVlanState(TypedDict):
     permit_vlans: list[int]
 
 
-class PortVlanIntent(TypedDict):
-    """Backward-compatible JTCom backend intent used by the current apply path."""
-
-    mode: PortMode
-    native_vlan: int | None
-    permit_vlans: list[int]
-
 _MODE_CHANGE_HINT = "Set allow_port_mode_change=true to allow this access/trunk transition."
 _UNTAGGED_MOVE_HINT = "Set allow_untagged_move=True to allow this untagged/native VLAN move."
 _VLAN_DELETE_IN_USE_HINT = (
@@ -142,7 +135,6 @@ class VlanMembershipPlan:
 
     current_per_port: PortMembershipMap
     desired_per_port: PortMembershipMap
-    desired_port_vlan: dict[int, PortVlanIntent]
     changed_ports: list[int]
     changed_vlans: list[int]
     warnings: list[dict[str, Any]]
@@ -465,11 +457,11 @@ def plan_vlan_membership_changes(
     if untagged_move_warnings and not allow_untagged_move and not check_mode:
         raise VlanMembershipUntaggedMoveError(untagged_move_warnings)
 
+    # Canonical desired_per_port is the vendor-independent planning truth.
     mode_none_warnings = apply_mode_none_fallback(desired, changed_ports(current, desired))
-    desired_port_vlan = build_desired_port_vlan(desired)
     changed = changed_ports(current, desired)
     mode_change_warnings = detect_mode_change_warnings(current, desired)
-    unsupported_mode_warnings = detect_unsupported_mode_warnings(desired_port_vlan, changed)
+    unsupported_mode_warnings = detect_unsupported_mode_warnings(desired, changed)
     warnings = (
         delete_in_use_warnings
         + untagged_move_warnings
@@ -486,7 +478,6 @@ def plan_vlan_membership_changes(
     return VlanMembershipPlan(
         current_per_port=current,
         desired_per_port=desired,
-        desired_port_vlan=desired_port_vlan,
         changed_ports=changed,
         changed_vlans=changed_vlans(current, desired),
         warnings=warnings,
@@ -638,14 +629,14 @@ def apply_mode_none_fallback(
 
 
 def detect_unsupported_mode_warnings(
-    desired_port_vlan: dict[int, PortVlanIntent],
+    desired_per_port: PortMembershipMap,
     changed_port_ids: Iterable[int],
 ) -> list[dict[str, Any]]:
-    """Return changed ports whose desired mode is unsupported by the write API."""
+    """Return changed ports whose canonical desired state cannot be compiled."""
     warnings: list[dict[str, Any]] = []
     for port_id in sorted(changed_port_ids):
-        intent = desired_port_vlan[port_id]
-        if intent["mode"] == "none":
+        desired_state = desired_per_port[port_id]
+        if classify_port_mode(desired_state) == "none":
             warnings.append(
                 {
                     "type": "unsupported_vlan_port_mode",
@@ -654,13 +645,10 @@ def detect_unsupported_mode_warnings(
                     "vlan_id": None,
                     "message": (
                         f"Port {port_id} resolved to unsupported VLAN mode "
-                        f"{intent['mode']}."
+                        "'none'."
                     ),
                     "desired_mode": "none",
-                    "desired_state": {
-                        "native_vlan": intent["native_vlan"],
-                        "permit_vlans": list(intent["permit_vlans"]),
-                    },
+                    "desired_state": serialize_port_state(desired_state),
                     "hint": _NONE_MODE_HINT,
                 }
             )
@@ -672,37 +660,6 @@ def _detach_vlan(per_port: PortMembershipMap, vlan_id: int) -> None:
         _tagged_vlans(state).discard(vlan_id)
         if _untagged_vlan(state) == vlan_id:
             state["untagged_vlan"] = None
-
-
-def build_desired_port_vlan(per_port: PortMembershipMap) -> dict[int, PortVlanIntent]:
-    """Build JTCom backend-facing per-port VLAN intent from canonical semantics.
-
-    The returned representation is not canonical truth.  It is the transitional
-    backend intent used by the current JTCom apply path, where trunk state is
-    expressed as ``native_vlan`` plus ``permit_vlans`` and ``permit_vlans``
-    includes the native VLAN.
-    """
-    intent: dict[int, PortVlanIntent] = {}
-    for port_id, state in sorted(per_port.items()):
-        mode = classify_port_mode(state)
-        native_vlan = _untagged_vlan(state)
-        tagged = _tagged_vlans(state)
-        if mode == "trunk":
-            permit = set(tagged)
-            if native_vlan is not None:
-                permit.add(native_vlan)
-            permit_vlans = sorted(permit)
-        elif mode == "access":
-            permit_vlans = [native_vlan] if native_vlan is not None else []
-        else:
-            permit_vlans = []
-
-        intent[port_id] = {
-            "mode": mode,
-            "native_vlan": native_vlan,
-            "permit_vlans": permit_vlans,
-        }
-    return intent
 
 
 def changed_ports(
@@ -743,11 +700,16 @@ def changed_vlans(
 def serialize_membership_map(per_port: PortMembershipMap) -> dict[int, dict[str, Any]]:
     """Return a JSON-friendly representation of a membership map."""
     return {
-        port_id: {
-            "untagged_vlan": _untagged_vlan(state),
-            "tagged_vlans": sorted(_tagged_vlans(state)),
-        }
+        port_id: serialize_port_state(state)
         for port_id, state in sorted(per_port.items())
+    }
+
+
+def serialize_port_state(state: PortMembershipState) -> dict[str, Any]:
+    """Return one canonical port membership state as JSON-friendly data."""
+    return {
+        "untagged_vlan": _untagged_vlan(state),
+        "tagged_vlans": sorted(_tagged_vlans(state)),
     }
 
 
