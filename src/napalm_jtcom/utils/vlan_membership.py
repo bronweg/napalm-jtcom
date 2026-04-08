@@ -20,17 +20,25 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Literal, TypedDict
 
 from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
 
 PortMode = Literal["access", "trunk", "none"]
 BackendPortMode = Literal["access", "trunk"]
-MembershipSemantics = Literal["absent", "untagged", "tagged"]
 PortMembershipState = dict[str, int | set[int] | None]
 PortMembershipMap = dict[int, PortMembershipState]
 NullablePortSet = set[int] | None
 DEFAULT_FALLBACK_VLAN_ID = 1
+
+
+class Membership(StrEnum):
+    """Canonical per-(port, vlan) membership type."""
+
+    ABSENT = "absent"
+    UNTAGGED = "untagged"
+    TAGGED = "tagged"
 
 
 class JTComPortVlanState(TypedDict):
@@ -163,10 +171,30 @@ def make_port_state(
 def validate_canonical_port_state(state: PortMembershipState) -> None:
     """Validate canonical on-wire VLAN membership invariants.
 
+    NOTE:
+    The current canonical model assumes at most one untagged VLAN per port.
+    This matches the currently supported device capabilities, but may need
+    extension in the future for more advanced switching models.
+
     Invariants:
     - at most one untagged VLAN
     - a VLAN cannot be both untagged and tagged on the same port
     """
+    untagged_value = state["untagged_vlan"]
+    tagged_value = state["tagged_vlans"]
+
+    if untagged_value is not None and not isinstance(untagged_value, int):
+        raise ValueError("untagged_vlan must be int | None in canonical port state")
+    if untagged_value is not None and not 1 <= untagged_value <= 4094:
+        raise ValueError(f"untagged_vlan must be 1..4094, got {untagged_value}")
+    if not isinstance(tagged_value, set):
+        raise ValueError("tagged_vlans must be set[int] in canonical port state")
+    for vlan_id in tagged_value:
+        if not isinstance(vlan_id, int):
+            raise ValueError("tagged_vlans must contain only int VLAN IDs")
+        if not 1 <= vlan_id <= 4094:
+            raise ValueError(f"tagged_vlans must contain VLAN IDs in 1..4094, got {vlan_id}")
+
     untagged = _untagged_vlan(state)
     tagged = _tagged_vlans(state)
     if untagged is not None and untagged in tagged:
@@ -176,17 +204,17 @@ def validate_canonical_port_state(state: PortMembershipState) -> None:
         )
 
 
-def canonical_membership_for_vlan(
+def get_vlan_membership_type(
     state: PortMembershipState,
     vlan_id: int,
-) -> MembershipSemantics:
+) -> Membership:
     """Return canonical per-(port, vlan) membership semantics."""
     validate_canonical_port_state(state)
     if _untagged_vlan(state) == vlan_id:
-        return "untagged"
+        return Membership.UNTAGGED
     if vlan_id in _tagged_vlans(state):
-        return "tagged"
-    return "absent"
+        return Membership.TAGGED
+    return Membership.ABSENT
 
 
 def canonical_to_jtcom_port_vlan_state(
@@ -194,13 +222,33 @@ def canonical_to_jtcom_port_vlan_state(
 ) -> JTComPortVlanState:
     """Convert canonical on-wire semantics into JTCom backend representation.
 
+    This helper compiles canonical membership semantics into the current JTCom
+    backend trunk/access model.
+
+    IMPORTANT:
+    On JTCom trunk ports, ``permit_vlans`` includes ``native_vlan``.
+    Canonical ``tagged_vlans`` represents on-wire tagged VLANs only.
+    Therefore canonical ``tagged_vlans`` must never be treated as a permit list.
+
     Supported cases:
     - access: one untagged VLAN, no tagged VLANs
     - trunk: one untagged VLAN, one or more tagged VLANs
 
-    Unsupported in this step:
+    Unsupported JTCom backend cases:
     - tagged-only canonical state
     - empty canonical state
+
+    Canonically, both of those states are meaningful. They are rejected here
+    only because the current JTCom backend compiler cannot express them safely
+    without prior policy resolution.
+
+    Example:
+    - canonical: ``untagged_vlan=1``, ``tagged_vlans={61}``
+    - JTCom: ``mode="trunk"``, ``native_vlan=1``, ``permit_vlans=[1, 61]``
+
+    The empty canonical port state is valid canonical truth. It simply cannot
+    be converted directly to JTCom backend state until the policy layer
+    resolves it first.
     """
     validate_canonical_port_state(state)
     untagged = _untagged_vlan(state)
@@ -223,17 +271,32 @@ def canonical_to_jtcom_port_vlan_state(
         }
     if untagged is None and tagged:
         raise ValueError(
-            "JTCom backend conversion does not support tagged-only canonical VLAN state"
+            "JTCom backend does not support tagged-only port state without an "
+            "untagged/native VLAN."
         )
     raise ValueError(
-        "JTCom backend conversion requires at least one canonical VLAN membership"
+        "Empty canonical port state cannot be converted directly to JTCom backend "
+        "state; policy layer must resolve it first."
     )
 
 
 def jtcom_to_canonical_port_vlan_state(
     backend_state: JTComPortVlanState,
 ) -> PortMembershipState:
-    """Convert JTCom backend trunk/access representation into canonical semantics."""
+    """Convert JTCom backend trunk/access representation into canonical semantics.
+
+    JTCom trunk readback is backend-oriented:
+    - ``native_vlan`` is the untagged VLAN
+    - ``permit_vlans`` includes ``native_vlan``
+
+    Canonical truth is derived as:
+    - ``untagged_vlan = native_vlan``
+    - ``tagged_vlans = set(permit_vlans) - {native_vlan}``
+
+    Example:
+    - JTCom: ``mode="trunk"``, ``native_vlan=1``, ``permit_vlans=[1, 61]``
+    - canonical: ``untagged_vlan=1``, ``tagged_vlans={61}``
+    """
     mode = backend_state["mode"]
     access_vlan = backend_state["access_vlan"]
     native_vlan = backend_state["native_vlan"]
@@ -255,6 +318,9 @@ def jtcom_to_canonical_port_vlan_state(
             f"JTCom trunk state invariant violated: native_vlan={native_vlan} "
             "must be present in permit_vlans"
         )
+    # IMPORTANT: permit_vlans != tagged_vlans on JTCom trunk ports.
+    # JTCom includes native_vlan inside permit_vlans, while canonical
+    # tagged_vlans represents on-wire tagged VLANs only.
     return make_port_state(
         untagged_vlan=native_vlan,
         tagged_vlans=[vlan_id for vlan_id in permit_vlans if vlan_id != native_vlan],

@@ -5,8 +5,9 @@ from __future__ import annotations
 import pytest
 
 from napalm_jtcom.utils.vlan_membership import (
-    canonical_membership_for_vlan,
+    Membership,
     canonical_to_jtcom_port_vlan_state,
+    get_vlan_membership_type,
     jtcom_to_canonical_port_vlan_state,
     make_port_state,
     validate_canonical_port_state,
@@ -80,12 +81,15 @@ def test_invalid_jtcom_trunk_requires_native_vlan_in_permit_list() -> None:
 
 
 def test_tagged_only_canonical_state_is_not_supported_for_jtcom_conversion() -> None:
-    with pytest.raises(ValueError, match="tagged-only canonical VLAN state"):
+    with pytest.raises(
+        ValueError,
+        match="does not support tagged-only port state without an untagged/native VLAN",
+    ):
         canonical_to_jtcom_port_vlan_state(make_port_state(tagged_vlans={20}))
 
 
 def test_empty_canonical_state_is_not_supported_for_jtcom_conversion() -> None:
-    with pytest.raises(ValueError, match="requires at least one canonical VLAN membership"):
+    with pytest.raises(ValueError, match="policy layer must resolve it first"):
         canonical_to_jtcom_port_vlan_state(make_port_state())
 
 
@@ -94,12 +98,37 @@ def test_canonical_invariant_rejects_same_vlan_as_tagged_and_untagged() -> None:
         make_port_state(untagged_vlan=10, tagged_vlans={10, 20})
 
 
-def test_canonical_membership_for_vlan_reports_absent_untagged_and_tagged() -> None:
+def test_get_vlan_membership_type_reports_absent_untagged_and_tagged() -> None:
     state = make_port_state(untagged_vlan=10, tagged_vlans={20, 30})
-    assert canonical_membership_for_vlan(state, 10) == "untagged"
-    assert canonical_membership_for_vlan(state, 20) == "tagged"
-    assert canonical_membership_for_vlan(state, 99) == "absent"
+    assert get_vlan_membership_type(state, 10) is Membership.UNTAGGED
+    assert get_vlan_membership_type(state, 20) is Membership.TAGGED
+    assert get_vlan_membership_type(state, 99) is Membership.ABSENT
 
 
 def test_validate_canonical_port_state_accepts_valid_state() -> None:
     validate_canonical_port_state(make_port_state(untagged_vlan=10, tagged_vlans={20}))
+
+
+def test_validate_canonical_port_state_rejects_non_int_untagged_vlan() -> None:
+    with pytest.raises(ValueError, match="untagged_vlan must be int"):
+        validate_canonical_port_state({"untagged_vlan": "10", "tagged_vlans": set()})  # type: ignore[arg-type]
+
+
+def test_validate_canonical_port_state_rejects_untagged_vlan_out_of_range() -> None:
+    with pytest.raises(ValueError, match="untagged_vlan must be 1..4094"):
+        validate_canonical_port_state({"untagged_vlan": 0, "tagged_vlans": set()})
+
+
+def test_validate_canonical_port_state_rejects_non_set_tagged_vlans() -> None:
+    with pytest.raises(ValueError, match="tagged_vlans must be set\\[int\\]"):
+        validate_canonical_port_state({"untagged_vlan": None, "tagged_vlans": [10]})  # type: ignore[arg-type]
+
+
+def test_validate_canonical_port_state_rejects_non_int_tagged_vlan_member() -> None:
+    with pytest.raises(ValueError, match="tagged_vlans must contain only int VLAN IDs"):
+        validate_canonical_port_state({"untagged_vlan": None, "tagged_vlans": {1, "20"}})  # type: ignore[arg-type]
+
+
+def test_validate_canonical_port_state_rejects_tagged_vlan_out_of_range() -> None:
+    with pytest.raises(ValueError, match="tagged_vlans must contain VLAN IDs in 1..4094"):
+        validate_canonical_port_state({"untagged_vlan": None, "tagged_vlans": {4095}})
