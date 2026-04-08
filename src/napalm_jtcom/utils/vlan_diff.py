@@ -15,7 +15,7 @@ VLANs not mentioned in *desired* are left untouched.
 from __future__ import annotations
 
 from napalm_jtcom.model.vlan import VlanChangeSet, VlanConfig, VlanEntry
-from napalm_jtcom.utils.vlan_membership import apply_vlan_membership_config
+from napalm_jtcom.utils.vlan_membership import apply_vlan_membership_config, port_name_to_id
 
 
 def plan_vlan_changes(
@@ -77,9 +77,10 @@ def _port_names_to_ids(names: set[str]) -> set[int]:
     """Convert a set of ``"Port N"`` strings to 1-based port IDs."""
     port_ids: set[int] = set()
     for name in names:
-        parts = name.rsplit(" ", 1)
-        if len(parts) == 2 and parts[1].isdigit():
-            port_ids.add(int(parts[1]))
+        try:
+            port_ids.add(port_name_to_id(name))
+        except ValueError:
+            continue
     return port_ids
 
 

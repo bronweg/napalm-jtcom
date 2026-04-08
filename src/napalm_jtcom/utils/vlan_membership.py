@@ -355,11 +355,12 @@ def build_current_per_port_from_vlans(
 
     for vlan_id, entry in sorted(vlans.items()):
         for port_name in entry.untagged_ports:
-            port_id = _port_name_to_id(port_name)
-            if port_id is None:
+            try:
+                port_id = port_name_to_id(port_name)
+            except ValueError:
                 raise ValueError(
                     f"Cannot parse untagged port name {port_name!r} in VLAN {vlan_id}"
-                )
+                ) from None
             current.setdefault(port_id, make_port_state())
             state = current[port_id]
             existing = _untagged_vlan(state)
@@ -371,9 +372,12 @@ def build_current_per_port_from_vlans(
             state["untagged_vlan"] = vlan_id
 
         for port_name in entry.tagged_ports:
-            port_id = _port_name_to_id(port_name)
-            if port_id is None:
-                raise ValueError(f"Cannot parse tagged port name {port_name!r} in VLAN {vlan_id}")
+            try:
+                port_id = port_name_to_id(port_name)
+            except ValueError:
+                raise ValueError(
+                    f"Cannot parse tagged port name {port_name!r} in VLAN {vlan_id}"
+                ) from None
             current.setdefault(port_id, make_port_state())
             _tagged_vlans(current[port_id]).add(vlan_id)
 
@@ -394,9 +398,12 @@ def build_current_per_port_from_jtcom_readback(
     current: PortMembershipMap = {port_id: make_port_state() for port_id in known_ports}
 
     for backend_port in port_configs:
-        port_id = _port_name_to_id(backend_port.port_name)
-        if port_id is None:
-            raise ValueError(f"Cannot parse backend port name {backend_port.port_name!r}")
+        try:
+            port_id = port_name_to_id(backend_port.port_name)
+        except ValueError:
+            raise ValueError(
+                f"Cannot parse backend port name {backend_port.port_name!r}"
+            ) from None
         backend_mode = backend_port.vlan_type.lower()
         if backend_mode == "access":
             backend_state: JTComPortVlanState = {
@@ -873,9 +880,14 @@ def _tagged_vlans(state: PortMembershipState) -> set[int]:
     return value
 
 
-def _port_name_to_id(name: str) -> int | None:
-    """Convert ``"Port N"`` to its 1-based port ID."""
+def port_name_to_id(name: str) -> int:
+    """Convert a JTCom-style port label into the canonical 1-based port ID.
+
+    This helper converts labels like ``"Port 5"`` into the project-standard
+    1-based port IDs used throughout the canonical/domain model. Callers must
+    use this helper instead of ad hoc parsing.
+    """
     parts = name.rsplit(" ", 1)
-    if len(parts) == 2 and parts[1].isdigit():
+    if len(parts) == 2 and parts[0] == "Port" and parts[1].isdigit():
         return int(parts[1])
-    return None
+    raise ValueError(f"Invalid JTCom port name {name!r}; expected 'Port N'")

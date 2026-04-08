@@ -24,6 +24,7 @@ from napalm_jtcom.utils.vlan_membership import (
     build_desired_port_vlan,
     make_port_state,
     plan_vlan_membership_changes,
+    port_name_to_id,
 )
 
 
@@ -38,6 +39,16 @@ def assert_common_warning_fields(
     assert isinstance(warning["message"], str)
     assert warning["message"]
     assert "hint" in warning
+
+
+def test_port_name_to_id_parses_canonical_1_based_ids() -> None:
+    assert port_name_to_id("Port 1") == 1
+    assert port_name_to_id("Port 5") == 5
+
+
+def test_port_name_to_id_rejects_malformed_input() -> None:
+    with pytest.raises(ValueError, match="Invalid JTCom port name"):
+        port_name_to_id("Gi1/0/1")
 
 
 def test_tagged_add_merges() -> None:

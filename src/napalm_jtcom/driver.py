@@ -15,7 +15,7 @@ from napalm_jtcom.client.session import JTComCredentials, JTComSession
 from napalm_jtcom.client.vlan_ops import vlan_create, vlan_delete, vlan_set_port
 from napalm_jtcom.model.config import DeviceConfig
 from napalm_jtcom.model.port import PortChangeSet, PortConfig, PortSettings
-from napalm_jtcom.model.vlan import VlanConfig, VlanEntry, VlanPortConfig
+from napalm_jtcom.model.vlan import VlanConfig, VlanEntry
 from napalm_jtcom.parser.device import parse_device_info, parse_uptime_seconds
 from napalm_jtcom.parser.port import parse_port_page
 from napalm_jtcom.parser.vlan import parse_port_vlan_settings, parse_static_vlans
@@ -32,6 +32,7 @@ from napalm_jtcom.utils.vlan_membership import (
     build_current_per_port_from_vlans,
     diff_membership_maps,
     plan_vlan_membership_changes,
+    port_name_to_id,
     serialize_membership_map,
 )
 from napalm_jtcom.vendor.jtcom.endpoints import (
@@ -744,19 +745,14 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         port_configs = parse_port_vlan_settings(port_html)
 
         vlan_map: dict[int, VlanEntry] = {v.vlan_id: v for v in vlans}
-        known_ports = [
-            port_id
-            for pc in port_configs
-            if (port_id := _port_config_id(pc)) is not None
-        ]
+        known_ports = [port_name_to_id(pc.port_name) for pc in port_configs]
         current_per_port = build_current_per_port_from_jtcom_readback(
             port_configs,
             known_ports,
         )
         port_name_by_id = {
-            port_id: pc.port_name
+            port_name_to_id(pc.port_name): pc.port_name
             for pc in port_configs
-            if (port_id := _port_config_id(pc)) is not None
         }
         for port_id, state in current_per_port.items():
             port_name = port_name_by_id.get(port_id)
@@ -839,11 +835,3 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         if self._session is None:
             raise JTComError("Session not open — call open() first.")
         return self._session
-
-
-def _port_config_id(port_config: VlanPortConfig) -> int | None:
-    """Parse a 1-based port ID from vendor port labels like ``Port 5``."""
-    parts = port_config.port_name.rsplit(" ", 1)
-    if len(parts) == 2 and parts[1].isdigit():
-        return int(parts[1])
-    return None
