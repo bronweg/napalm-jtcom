@@ -25,11 +25,16 @@
         password: "{{ jtcom_pass }}"
         backup_before_change: true
         allow_port_mode_change: true
+        allow_untagged_move: true
+        allow_vlan_delete_in_use: true
+        ports:
+          4:
+            admin_up: true
+            access_vlan: 1
         vlans:
           61:
             name: Admin_VLAN
-            state: present
-            tagged_ports: [1, 2, 3, 4, 5]
+            state: absent
       register: result
 
     - name: Show result
