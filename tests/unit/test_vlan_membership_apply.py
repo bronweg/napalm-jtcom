@@ -15,13 +15,14 @@ from napalm_jtcom.driver import JTComDriver
 from napalm_jtcom.model.port import PortSettings
 from napalm_jtcom.model.vlan import VlanConfig, VlanEntry, VlanPortConfig
 from napalm_jtcom.utils.vlan_membership import (
+    PortMembershipMap,
     VlanDeleteInUseError,
     VlanMembershipModeChangeError,
     VlanMembershipPlan,
     VlanMembershipUntaggedMoveError,
     build_current_per_port_from_jtcom_readback,
     build_current_per_port_from_vlans,
-    build_desired_port_vlan,
+    canonical_to_jtcom_port_vlan_state,
     make_port_state,
     plan_vlan_membership_changes,
     port_name_to_id,
@@ -171,15 +172,16 @@ def test_omitted_legacy_fields_are_noop_not_empty_replacement() -> None:
     assert plan.desired_per_port[5]["tagged_vlans"] == {20, 30}
 
 
-def test_trunk_intent_uses_full_final_permit_list_not_delta() -> None:
-    per_port = {5: make_port_state(untagged_vlan=10, tagged_vlans={20, 30})}
-    intent = build_desired_port_vlan(per_port)
-    assert intent[5]["mode"] == "trunk"
-    assert intent[5]["native_vlan"] == 10
-    assert intent[5]["permit_vlans"] == [10, 20, 30]
+def test_canonical_compilation_produces_full_final_permit_list_not_delta() -> None:
+    backend = canonical_to_jtcom_port_vlan_state(
+        make_port_state(untagged_vlan=10, tagged_vlans={20, 30})
+    )
+    assert backend["mode"] == "trunk"
+    assert backend["native_vlan"] == 10
+    assert backend["permit_vlans"] == [10, 20, 30]
 
 
-def test_driver_apply_sends_full_permit_list_for_changed_port_only() -> None:
+def test_driver_apply_compiles_canonical_state_at_final_boundary() -> None:
     driver = JTComDriver("192.0.2.1", "admin", "admin")
     session = MagicMock()
     plan = VlanMembershipPlan(
@@ -187,10 +189,6 @@ def test_driver_apply_sends_full_permit_list_for_changed_port_only() -> None:
         desired_per_port={
             4: make_port_state(),
             5: make_port_state(untagged_vlan=10, tagged_vlans={20, 30}),
-        },
-        desired_port_vlan={
-            4: {"mode": "none", "native_vlan": None, "permit_vlans": []},
-            5: {"mode": "trunk", "native_vlan": 10, "permit_vlans": [10, 20, 30]},
         },
         changed_ports=[5],
         changed_vlans=[10, 30],
@@ -207,6 +205,120 @@ def test_driver_apply_sends_full_permit_list_for_changed_port_only() -> None:
     assert payload["VlanType"] == "1"
     assert payload["NativeVlan"] == "10"
     assert payload["PermitVlan"] == "10_20_30"
+
+
+def test_driver_apply_uses_shared_canonical_to_jtcom_compiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    session = MagicMock()
+    seen: list[dict[str, object]] = []
+
+    def fake_compile(state: dict[str, object]) -> dict[str, object]:
+        seen.append(state)
+        return {
+            "mode": "trunk",
+            "access_vlan": None,
+            "native_vlan": 1,
+            "permit_vlans": [1, 61],
+        }
+
+    monkeypatch.setattr("napalm_jtcom.driver.canonical_to_jtcom_port_vlan_state", fake_compile)
+    plan = VlanMembershipPlan(
+        current_per_port={1: make_port_state(untagged_vlan=1)},
+        desired_per_port={1: make_port_state(untagged_vlan=1, tagged_vlans={61})},
+        changed_ports=[1],
+        changed_vlans=[61],
+        warnings=[],
+    )
+
+    driver._apply_vlan_membership_plan(session, plan)
+
+    assert seen == [make_port_state(untagged_vlan=1, tagged_vlans={61})]
+    payload = session.post.call_args.kwargs["data"]
+    assert payload["NativeVlan"] == "1"
+    assert payload["PermitVlan"] == "1_61"
+
+
+def test_apply_boundary_rejects_tagged_only_canonical_state_clearly() -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+
+    with pytest.raises(
+        ValueError,
+        match="Port 5 canonical state cannot be compiled to JTCom backend",
+    ):
+        driver._apply_vlan_membership_plan(
+            MagicMock(),
+            VlanMembershipPlan(
+                current_per_port={5: make_port_state()},
+                desired_per_port={5: make_port_state(tagged_vlans={61})},
+                changed_ports=[5],
+                changed_vlans=[61],
+                warnings=[],
+            ),
+        )
+
+
+def test_apply_boundary_rejects_empty_canonical_state_clearly() -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+
+    with pytest.raises(
+        ValueError,
+        match="Port 5 canonical state cannot be compiled to JTCom backend",
+    ):
+        driver._apply_vlan_membership_plan(
+            MagicMock(),
+            VlanMembershipPlan(
+                current_per_port={5: make_port_state(untagged_vlan=10)},
+                desired_per_port={5: make_port_state()},
+                changed_ports=[5],
+                changed_vlans=[10],
+                warnings=[],
+            ),
+        )
+
+
+def test_apply_boundary_does_not_mutate_canonical_plan_state() -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    session = MagicMock()
+    desired_state = make_port_state(untagged_vlan=1, tagged_vlans={61})
+    plan = VlanMembershipPlan(
+        current_per_port={1: make_port_state(untagged_vlan=1)},
+        desired_per_port={1: desired_state},
+        changed_ports=[1],
+        changed_vlans=[61],
+        warnings=[],
+    )
+    before = make_port_state(untagged_vlan=1, tagged_vlans={61})
+
+    driver._apply_vlan_membership_plan(session, plan)
+
+    assert plan.desired_per_port[1] == before
+    assert desired_state == before
+
+
+def test_real_world_trunk_playbook_scenario_stays_canonical_until_apply() -> None:
+    current = {
+        port_id: make_port_state(untagged_vlan=1)
+        for port_id in [1, 2, 3, 4, 5]
+    }
+    plan = plan_vlan_membership_changes(
+        current,
+        [VlanConfig(vlan_id=61, tagged_add=[1, 2, 3, 4, 5])],
+        allow_port_mode_change=True,
+    )
+
+    for port_id in [1, 2, 3, 4, 5]:
+        assert plan.desired_per_port[port_id] == make_port_state(
+            untagged_vlan=1,
+            tagged_vlans={61},
+        )
+        assert canonical_to_jtcom_port_vlan_state(plan.desired_per_port[port_id]) == {
+            "mode": "trunk",
+            "access_vlan": None,
+            "native_vlan": 1,
+            "permit_vlans": [1, 61],
+        }
 
 
 def test_fetch_vlan_state_materializes_canonical_membership_from_jtcom_readback(
@@ -275,7 +387,7 @@ def test_check_mode_warns_instead_of_failing_on_desired_mode_none() -> None:
         check_mode=True,
     )
     assert_common_warning_fields(plan.warnings[0], type_="mode_none_mapped_to_vlan1", entity="port")
-    assert plan.desired_port_vlan[3]["mode"] == "access"
+    assert plan.desired_per_port[3] == make_port_state(untagged_vlan=1)
     assert plan.desired_per_port[3]["untagged_vlan"] == 1
     assert plan.warnings[0]["type"] == "mode_none_mapped_to_vlan1"
     assert plan.warnings[0]["port_id"] == 3
@@ -289,7 +401,13 @@ def test_apply_mode_maps_desired_mode_none_to_vlan1() -> None:
         current,
         [VlanConfig(vlan_id=20, untagged_remove=[3])],
     )
-    assert plan.desired_port_vlan[3] == {"mode": "access", "native_vlan": 1, "permit_vlans": [1]}
+    assert plan.desired_per_port[3] == make_port_state(untagged_vlan=1)
+    assert canonical_to_jtcom_port_vlan_state(plan.desired_per_port[3]) == {
+        "mode": "access",
+        "access_vlan": 1,
+        "native_vlan": None,
+        "permit_vlans": [],
+    }
     assert plan.warnings[0]["type"] == "mode_none_mapped_to_vlan1"
 
 
@@ -484,7 +602,7 @@ def test_mode_none_fallback_check_mode_warns_on_trunk_to_access_transition() -> 
         "port_mode_change",
     ]
     assert plan.desired_per_port[5]["untagged_vlan"] == 1
-    assert plan.desired_port_vlan[5]["mode"] == "access"
+    assert canonical_to_jtcom_port_vlan_state(plan.desired_per_port[5])["mode"] == "access"
 
 
 def test_mode_none_fallback_allows_trunk_to_access_transition_with_override() -> None:
@@ -499,7 +617,7 @@ def test_mode_none_fallback_allows_trunk_to_access_transition_with_override() ->
         "port_mode_change",
     ]
     assert plan.desired_per_port[5]["untagged_vlan"] == 1
-    assert plan.desired_port_vlan[5]["mode"] == "access"
+    assert canonical_to_jtcom_port_vlan_state(plan.desired_per_port[5])["mode"] == "access"
 
 
 def test_verify_vlan_membership_accepts_canonicalized_jtcom_trunk_readback(
@@ -510,9 +628,6 @@ def test_verify_vlan_membership_accepts_canonicalized_jtcom_trunk_readback(
     membership_plan = VlanMembershipPlan(
         current_per_port={1: make_port_state(untagged_vlan=1)},
         desired_per_port={1: make_port_state(untagged_vlan=1, tagged_vlans={61})},
-        desired_port_vlan={
-            1: {"mode": "trunk", "native_vlan": 1, "permit_vlans": [1, 61]}
-        },
         changed_ports=[1],
         changed_vlans=[61],
         warnings=[],
@@ -533,6 +648,48 @@ def test_verify_vlan_membership_accepts_canonicalized_jtcom_trunk_readback(
     driver._verify_vlan_membership(session, membership_plan)
 
 
+def test_verify_expected_state_remains_canonical_not_backend_shaped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = JTComDriver("192.0.2.1", "admin", "admin")
+    session = MagicMock()
+    membership_plan = VlanMembershipPlan(
+        current_per_port={1: make_port_state(untagged_vlan=1)},
+        desired_per_port={1: make_port_state(untagged_vlan=1, tagged_vlans={61})},
+        changed_ports=[1],
+        changed_vlans=[61],
+        warnings=[],
+    )
+
+    monkeypatch.setattr(
+        driver,
+        "_read_current_state",
+        lambda _session: (
+            {
+                1: VlanEntry(vlan_id=1, name="default", untagged_ports=["Port 1"]),
+                61: VlanEntry(vlan_id=61, name="admin", tagged_ports=["Port 1"]),
+            },
+            [PortSettings(port_id=1, name="Port 1", admin_up=True)],
+        ),
+    )
+
+    captured: dict[str, PortMembershipMap] = {}
+    driver_module = __import__("napalm_jtcom.driver", fromlist=["diff_membership_maps"])
+    original_diff = driver_module.diff_membership_maps
+
+    def capture_diff(current: PortMembershipMap, desired: PortMembershipMap) -> dict[str, object]:
+        captured["current"] = current
+        captured["desired"] = desired
+        return original_diff(current, desired)
+
+    monkeypatch.setattr("napalm_jtcom.driver.diff_membership_maps", capture_diff)
+
+    driver._verify_vlan_membership(session, membership_plan)
+
+    assert captured["desired"][1] == make_port_state(untagged_vlan=1, tagged_vlans={61})
+    assert captured["desired"][1]["tagged_vlans"] == {61}
+
+
 def test_verify_vlan_membership_still_fails_on_real_canonical_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -541,9 +698,6 @@ def test_verify_vlan_membership_still_fails_on_real_canonical_mismatch(
     membership_plan = VlanMembershipPlan(
         current_per_port={1: make_port_state(untagged_vlan=1)},
         desired_per_port={1: make_port_state(untagged_vlan=1, tagged_vlans={61})},
-        desired_port_vlan={
-            1: {"mode": "trunk", "native_vlan": 1, "permit_vlans": [1, 61]}
-        },
         changed_ports=[1],
         changed_vlans=[61],
         warnings=[],

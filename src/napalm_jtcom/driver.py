@@ -30,6 +30,8 @@ from napalm_jtcom.utils.vlan_membership import (
     VlanMembershipPlan,
     build_current_per_port_from_jtcom_readback,
     build_current_per_port_from_vlans,
+    canonical_to_jtcom_port_vlan_state,
+    copy_port_state,
     diff_membership_maps,
     plan_vlan_membership_changes,
     port_name_to_id,
@@ -663,35 +665,38 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         session: JTComSession,
         membership_plan: VlanMembershipPlan,
     ) -> None:
-        """Apply changed ports from a VLAN membership plan with full permit lists."""
+        """Compile canonical desired state to JTCom backend state at write time."""
         for port_id in membership_plan.changed_ports:
-            intent = membership_plan.desired_port_vlan[port_id]
-            mode = str(intent["mode"])
-            native_vlan = intent["native_vlan"]
-            permit_vlans = list(intent["permit_vlans"] or [])
+            desired_state = copy_port_state(membership_plan.desired_per_port[port_id])
+            # This is the only place where canonical desired port state is
+            # compiled into JTCom backend representation.
+            try:
+                backend_state = canonical_to_jtcom_port_vlan_state(desired_state)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Port {port_id} canonical state cannot be compiled to JTCom "
+                    f"backend: {exc}"
+                ) from exc
 
-            if mode == "trunk":
+            # JTCom backend uses access_vlan or native_vlan + permit_vlans,
+            # and permit_vlans includes the native VLAN on trunk ports.
+            if backend_state["mode"] == "trunk":
                 vlan_set_port(
                     session,
                     port_ids=[port_id],
                     vlan_type="trunk",
                     access_vlan=None,
-                    native_vlan=int(native_vlan) if native_vlan is not None else None,
-                    permit_vlans=[int(vlan_id) for vlan_id in permit_vlans],
+                    native_vlan=backend_state["native_vlan"],
+                    permit_vlans=list(backend_state["permit_vlans"]),
                 )
-            elif mode == "access":
+            elif backend_state["mode"] == "access":
                 vlan_set_port(
                     session,
                     port_ids=[port_id],
                     vlan_type="access",
-                    access_vlan=int(native_vlan) if native_vlan is not None else None,
+                    access_vlan=backend_state["access_vlan"],
                     native_vlan=None,
                     permit_vlans=[],
-                )
-            else:
-                raise ValueError(
-                    f"port_id={port_id}: desired VLAN mode 'none' cannot be applied safely; "
-                    "JTCom CGI exposes only access/trunk VLAN port modes"
                 )
 
     def _verify_vlan_membership(
@@ -699,7 +704,10 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
         session: JTComSession,
         membership_plan: VlanMembershipPlan,
     ) -> None:
-        """Verify changed VLAN membership ports after a real apply."""
+        """Verify changed VLAN membership ports after a real apply.
+
+        Expected and actual states are both canonicalized before comparison.
+        """
         if not membership_plan.changed_ports:
             return
         post_vlans, post_ports = self._read_current_state(session)
@@ -708,7 +716,7 @@ class JTComDriver(NetworkDriver):  # type: ignore[misc]
             [settings.port_id for settings in post_ports],
         )
         expected: PortMembershipMap = {
-            port_id: membership_plan.desired_per_port[port_id]
+            port_id: copy_port_state(membership_plan.desired_per_port[port_id])
             for port_id in membership_plan.changed_ports
         }
         actual: PortMembershipMap = {
